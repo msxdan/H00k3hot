@@ -1215,6 +1215,15 @@ int bank_stage(const Code& c) {
     return c.stage >= 0 && c.stage < kNvnStages ? c.stage : 0;   // (NVN2: task 6, mesh 7, with their own bindings)
 }
 
+/// RX_VK_DUMP_SPV=<folder>: a task or mesh stage's SPIR-V, as the draw programs' are (<key>.task.spv, <key>.mesh.spv), for spirv-val
+void dump_mesh_spv(const Program& p, const char* stage, const std::vector<uint32_t>& spirv) {
+    const char* dir = getenv("RX_VK_DUMP_SPV");
+    if (!dir || !Shader::Optimization::g_nvn2_miss_log_this) return;
+    char path[512];
+    snprintf(path, sizeof path, "%s/%016llx.%s.spv", dir, (unsigned long long)p.key, stage);
+    if (FILE* f = fopen(path, "wb")) fwrite(spirv.data(), 4, spirv.size(), f), fclose(f);
+}
+
 void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const Code& mesh, const Code* prim,
                          const Code* fsc, const uint8_t color_types[8]) {
     const auto t0 = std::chrono::steady_clock::now();
@@ -1240,6 +1249,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
             rt.previous_stage_stores.mask.set();
             const std::vector<uint32_t> spirv = Shader::Backend::SPIRV::EmitSPIRV(profile(), rt, task_t->program, bindings);
             kept.push_back(spirv);
+            dump_mesh_spv(p, "task", spirv);
             Stage st;
             st.nvn_stage = bank_stage(*task);
             st.info = task_t->program.info;
@@ -1272,6 +1282,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
         mrt.convert_depth_mode = host->depth_minus_w() != 0;
         const std::vector<uint32_t> mspirv = Shader::Backend::SPIRV::EmitSPIRV(profile(), mrt, mesh_t->program, bindings);
         kept.push_back(mspirv);
+        dump_mesh_spv(p, "mesh", mspirv);
         Stage ms;
         ms.nvn_stage = bank_stage(mesh);
         ms.info = mesh_t->program.info;
