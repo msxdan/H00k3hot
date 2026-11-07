@@ -132,7 +132,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
     for (const auto& instruction : code) {
         const u32 op = instruction.Bits(0, 12);
         uses_uniform_bank |= op == 0x3c4 || op == 0x2bd || op == 0x499 || op == 0x4a4 || op == 0xc07 || op == 0xc08 || op == 0x896 || op == 0xf60 || op == 0xc11 || op == 0xd08 || op == 0xc0c || op == 0x986 || op == 0x9a8 || op == 0xc12 || op == 0xc17 || op == 0xe24 || op == 0xc24 || op == 0xd00 || op == 0xd09 || op == 0x9c3 || op == 0xc45 || op == 0x2a4 || op == 0x891 || op == 0x890 || op == 0x290 || op == 0x28c || op == 0x88c || op == 0x287 || op == 0x887 || op == 0x958 || op == 0xab9 || op == 0xabb || op == 0x899 || op == 0xc20 || op == 0xe21 || op == 0xe23 || op == 0xc02 ||
-                             op == 0x886 || op == 0x3c2 || op == 0xc82 || op == 0x882 || op == 0x292 || op == 0x892 || op == 0x291 || op == 0x981 || op == 0xc13 || op == 0xc10 || op == 0xc23 || op == 0x526 || op == 0x2be || op == 0x8a4 || op == 0xd05 || (op == 0x984 && instruction.Bits(91, 1)) || op == 0x89c || op == 0x883 || op == 0x2a5 || op == 0xd06 || op == 0xf63 || op == 0xf69 || op == 0xc0b || op == 0x8a5 || op == 0x299 || op == 0xc09 || (op == 0x81c && instruction.Bits(67, 1)) || op == 0xc0a;
+                             op == 0x886 || op == 0x3c2 || op == 0xc82 || op == 0x882 || op == 0x292 || op == 0x892 || op == 0x291 || op == 0x981 || op == 0xc13 || op == 0xc10 || op == 0xc23 || op == 0x526 || op == 0x2be || op == 0x8a4 || op == 0xd05 || (op == 0x984 && instruction.Bits(91, 1)) || op == 0x89c || op == 0x883 || op == 0x2a5 || op == 0xd06 || op == 0xf63 || op == 0xf69 || op == 0xc0b || op == 0x8a5 || op == 0x299 || op == 0x987 || (op == 0x983 && instruction.Bits(91, 1)) || op == 0xc09 || (op == 0x81c && instruction.Bits(67, 1)) || op == 0xc0a;
     }
     const auto address_of = [](u32 index) { return 0x50U + index * 8 + ((index + 1) / 3) * 8; };
     const auto fail = [&](u32 index, std::string_view reason) {
@@ -201,7 +201,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 // SUST and SURED's data as well, the same field. (amd-fix, Lichii #149) RED's too: a reduction's data in a high GPR
                 // read the plain register, never written)
                 const bool register_field = bit != 32 || insn.Bits(9, 3) == 1 || opcode == 0xb60 || opcode == 0xb66 ||
-                                            opcode == 0x927 || opcode == 0xb9b || opcode == 0x59f || opcode == 0x983 ||
+                                            opcode == 0x927 || opcode == 0xb9b || opcode == 0x59f || opcode == 0x983 || opcode == 0x987 ||
                                             opcode == 0x98e || (renameable & (1U << f));
                 if (reg >= 255 || reg + 3 < reserved_base) continue;   // (a quad below may reach up)
                 if (register_field && reg >= reserved_base) any_high = true;
@@ -2492,18 +2492,33 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             result.instructions.push_back(translated);
             break;
         }
-        case 0x387: case 0x983: { // Local spill: 32, 64 or 128 bits at [Ra + immediate byte offset].
+        case 0x387: case 0x983: case 0x987: { // Local spill: 32, 64 or 128 bits at [Ra + immediate byte offset].
             // The size is bits 73-75 (4, 5, 6 = 32, 64, 128 bits); wider accesses become 32-bit ones.
-            // A load's bit 85 (.LU) is a cache hint.
-            const bool store = opcode == 0x387;
+            // A load's bit 85 (.LU) is a cache hint. (hookshot, from Lichii) 0x987 is the store at
+            // [Ra + URc + offset], URc bits 64-69, and 0x983 with bit 91 the load at [Ra + URb + offset], URb
+            // bits 32-37: the sum in R252, or the mirror alone when Ra is RZ
+            const bool store = opcode != 0x983;
+            const bool uniform_address = insn.Bits(91, 1) != 0;
             const u32 size = insn.Bits(73, 3);
-            const u32 data = insn.Bits(32, 8), offset = insn.Bits(40, 24), address = insn.Bits(24, 8);
+            const u32 data = insn.Bits(32, 8), offset = insn.Bits(40, 24);
+            u32 address = insn.Bits(24, 8);
             const u32 words = size == 6 ? 4 : size == 5 ? 2 : 1, value = store ? data : static_cast<u32>(dest);
-            if ((address != 255 && address >= 246) || (store && insn.Bits(16, 8)) || (!store && data) ||
+            const u32 allowed = (store ? 0xe00U : 0x200e00U) | (opcode == 0x987 ? 0x0800003fU : opcode == 0x983 ? 0x08000000U : 0U);
+            if ((address != 255 && address >= 246) || (store && insn.Bits(16, 8)) || (!store && data && !uniform_address) ||
                 (value != 255 && (value + words > 248 || (value & (words - 1)))) || (!store && value == 255) ||
                 (offset & 3) || offset + 4 * words > 0x800000 || size < 4 || size > 6 ||
-                (insn.words[2] & ~(store ? 0xe00U : 0x200e00U)) != 0x00100000U)
+                (opcode == 0x987 && !insn.Bits(91, 1)) || (insn.words[2] & ~allowed) != 0x00100000U)
                 return fail(index, "native local scalar spill mode");
+            if (uniform_address) {
+                const u32 uniform = uniform_register(store ? insn.Bits(64, 6) : data);
+                if (uniform == ~0U) return fail(index, "native local spill uniform address");
+                if (address == 255) {
+                    address = uniform;
+                } else if (uniform != 255) {
+                    emit(0x5c10000000000000ULL | predicate | 252 | (u64{uniform} << 8) | (u64{address} << 20));
+                    address = 252;
+                }
+            }
             for (u32 word = 0; word < words; ++word)
                 emit((store ? 0xef50000000000000ULL : 0xef40000000000000ULL) | predicate |
                      (value == 255 ? 255U : value + word) | (u64{address} << 8) |
