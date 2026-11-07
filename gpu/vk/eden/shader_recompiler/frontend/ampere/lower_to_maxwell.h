@@ -2519,10 +2519,15 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                     address = 252;
                 }
             }
-            for (u32 word = 0; word < words; ++word)
+            // (hookshot) a load into its own address register (OoT: LDL.128 R32, [R34 + 0x50]) loads that word last:
+            // in order, the words after it read the address from the loaded value
+            const u32 last = !store && address >= value && address < value + words ? address - value : words - 1;
+            for (u32 n = 0; n < words; ++n) {
+                const u32 word = n == words - 1 ? last : n < last ? n : n + 1;
                 emit((store ? 0xef50000000000000ULL : 0xef40000000000000ULL) | predicate |
                      (value == 255 ? 255U : value + word) | (u64{address} << 8) |
                      (u64{offset + 4 * word} << 20) | (u64{4} << 48));
+            }
             break;
         }
         case 0x803: { // P2R PR, register merge source, immediate mask, byte select (76-77)
