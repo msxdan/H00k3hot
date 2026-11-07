@@ -294,7 +294,9 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             // (ULEA, 0x291/0x891, has one carry out: its bits 84-86 are no predicate)
             const bool lea = opcode == 0x291 || opcode == 0x891;
             const bool no_predicate_out = insn.Bits(81, 3) == 7 && (lea || insn.Bits(84, 3) == 7);
-            if (insn.Bits(12, 4) != 7 && opcode != 0x292 && opcode != 0x892 && !no_predicate_out)
+            // (hookshot) the low ULEA's carry out too, which the LEA case keeps apart from the guard's save
+            const bool lea_carry = lea && !insn.Bits(80, 1) && insn.Bits(81, 3) != 7;
+            if (insn.Bits(12, 4) != 7 && opcode != 0x292 && opcode != 0x892 && !no_predicate_out && !lea_carry)
                 return fail(index, "native uniform arithmetic predication");
             uniform_guard = insn.Bits(12, 4) != 7;
             rewritten_uniform = true;
@@ -2977,14 +2979,18 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 // The sum in R250, carry = sum < Rb (unsigned), as IADD3's carry out; a uniform
                 // predicate goes through P(6-n) into R239.
                 const u32 target = rewritten_uniform ? 6 - carry_out : carry_out, mask = 1U << target;
+                // (hookshot) under a uniform guard (@UPm ULEA URd, UPn, ...: OoT) R253 holds the guard's slot, so
+                // the guest P(6-n) is kept in R254, and P(6-n) starts as UPn: a false guard leaves UPn as it was
+                const u32 keep = guarded_uniform ? 254U : 253U;
                 emit(0x5c18000000000000ULL | predicate | 250 | (u64{insn.Bits(24, 8)} << 8) |
                      (u64{b} << 20) | (u64{insn.Bits(75, 5)} << 39));
-                if (rewritten_uniform) emit(0x38e8000000070000ULL | 253 | (u64{255} << 8) | (u64{mask} << 20));
+                if (rewritten_uniform) emit(0x38e8000000070000ULL | keep | (u64{255} << 8) | (u64{mask} << 20));
+                if (guarded_uniform) emit(0x38f0000000070000ULL | (u64{239} << 8) | (u64{mask} << 20));
                 emit(0x5b60000000000000ULL | predicate | 7 | (u64{target} << 3) | (u64{250} << 8) |
                      (u64{b} << 20) | (u64{7} << 39) | (u64{1} << 49));
                 if (rewritten_uniform) {
                     emit(0x38e8000000070000ULL | 239 | (u64{239} << 8) | (u64{mask} << 20));
-                    emit(0x38f0000000070000ULL | (u64{253} << 8) | (u64{mask} << 20));
+                    emit(0x38f0000000070000ULL | (u64{keep} << 8) | (u64{mask} << 20));
                 }
                 emit(base(0x5c98000000000000ULL) | (u64{15} << 39) | (u64{250} << 20));
                 break;
