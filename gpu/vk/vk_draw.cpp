@@ -3227,7 +3227,7 @@ void stats_tick() {
                                 std::chrono::steady_clock::now().time_since_epoch()).count();
         if (now < next_check.load(std::memory_order_relaxed)) return;
         next_check.store(now + 500, std::memory_order_relaxed);
-        const std::string trigger = std::string(dir) + "\\draw_stats.now";
+        const std::string trigger = std::string(dir) + "/draw_stats.now";
         FILE* f = fopen(trigger.c_str(), "rb");
         if (!f) return;
         fclose(f);
@@ -3321,7 +3321,7 @@ void stats_tick() {
         return !ran ? 2 : !x.clip_in ? 0 : !x.fs ? 1 : 3;
     };
     std::stable_sort(rows.begin(), rows.end(), [&](const auto& a, const auto& b) { return rank(a.second) < rank(b.second); });
-    const std::string path = std::string(dir) + "\\draw_stats_" + std::to_string(at) + ".txt";
+    const std::string path = std::string(dir) + "/draw_stats_" + std::to_string(at) + ".txt";
     if (FILE* f = fopen(path.c_str(), "wb")) {
         fprintf(f, "# frame %lld: %u draws, %zu programs (query result %d). kind prog draws | vs task mesh | clip_in clip_out | fs | note\n",
                 (long long)at, n, rows.size(), (int)res);
