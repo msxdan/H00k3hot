@@ -3271,6 +3271,10 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             };
             bool linked = active_link && return_reg == *active_link;
             for (u32 prior = index; active_link && !linked && prior-- > active_entry;) {
+                // (hookshot) STL, STS and STG write no register: their bits 16-23 are zero, not R0 (OoT's
+                // STL [RZ+0x8], R2 between MOV R0, R14 and RET R0 kept a program out)
+                const u32 prior_op = code[prior].Bits(0, 12);
+                if (prior_op == 0x387 || prior_op == 0x388 || prior_op == 0x386 || prior_op == 0x986) continue;
                 if (copies_link(code[prior])) linked = true;
                 else if (code[prior].Bits(16, 8) == return_reg) break;
             }
