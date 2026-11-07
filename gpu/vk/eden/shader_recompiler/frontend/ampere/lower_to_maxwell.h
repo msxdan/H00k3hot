@@ -182,6 +182,13 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 if (reg >= 255 || reg + 3 < reserved_base) continue;   // (a quad below may reach up)
                 if (register_field && reg >= reserved_base) any_high = true;
             }
+            // (hookshot) every field's registers, before any is renamed: a marker must not be one a later field names
+            // natively, which the prefix would then map to the renamed register too
+            std::array<bool, 256> named{};
+            for (u32 f = 0; f < 4 && any_high; ++f) {
+                const u32 reg = insn.Bits(bits[f], 8);
+                for (u32 k = 0; k < span_of(reg) && reg + k < 255; ++k) named[reg + k] = true;
+            }
             for (u32 f = 0; f < 4 && any_high; ++f) {
                 const u32 bit = bits[f], reg = insn.Bits(bit, 8);
                 if (reg >= 255 || reg + 3 < reserved_base) continue;
@@ -195,7 +202,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                     for (u32 m = 216; m + span <= 246 && marker == 255; m += span) {
                         bool ok = true;
                         for (u32 k = 0; k < span && ok; ++k)
-                            ok = m + k != 239 && !avoid[m + k] && !marker_taken[m + k] && !native_high[m + k];
+                            ok = m + k != 239 && !avoid[m + k] && !marker_taken[m + k] && !native_high[m + k] && !named[m + k];
                         if (ok) marker = m;
                     }
                     if (marker != 255 && nrenamed < 8) {
