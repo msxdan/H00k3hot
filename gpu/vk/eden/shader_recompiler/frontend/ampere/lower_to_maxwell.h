@@ -2504,11 +2504,12 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             u32 address = insn.Bits(24, 8);
             const u32 words = size == 6 ? 4 : size == 5 ? 2 : 1, value = store ? data : static_cast<u32>(dest);
             const u32 allowed = (store ? 0xe00U : 0x200e00U) | (opcode == 0x987 ? 0x0800003fU : opcode == 0x983 ? 0x08000000U : 0U);
-            if ((address != 255 && address >= 246) || (store && insn.Bits(16, 8)) || (!store && data && !uniform_address) ||
-                (value != 255 && (value + words > 248 || (value & (words - 1)))) || (!store && value == 255) ||
+            if ((store && insn.Bits(16, 8)) || (!store && data && !uniform_address) ||
+                (value != 255 && (value + words > 255 || (value & (words - 1)))) || (!store && value == 255) ||
                 (offset & 3) || offset + 4 * words > 0x800000 || size < 4 || size > 6 ||
                 (opcode == 0x987 && !insn.Bits(91, 1)) || (insn.words[2] & ~allowed) != 0x00100000U)
                 return fail(index, "native local scalar spill mode");
+            bool summed = false;
             if (uniform_address) {
                 const u32 uniform = uniform_register(store ? insn.Bits(64, 6) : data);
                 if (uniform == ~0U) return fail(index, "native local spill uniform address");
@@ -2517,8 +2518,12 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 } else if (uniform != 255) {
                     emit(0x5c10000000000000ULL | predicate | 252 | (u64{uniform} << 8) | (u64{address} << 20));
                     address = 252;
+                    summed = true;
                 }
             }
+            // (hookshot) no scratch but R252 for Ra + URb: a high value or address (OoT: STL.128 [RZ + 0x9a0], R244,
+            // R248; LDL R247, [R247 + 0x9a0]) is the extended registers the prefix maps
+            own_scratch = summed ? 1U << 6 : 0U;
             // (hookshot) a load into its own address register (OoT: LDL.128 R32, [R34 + 0x50]) loads that word last:
             // in order, the words after it read the address from the loaded value
             const u32 last = !store && address >= value && address < value + words ? address - value : words - 1;
@@ -2855,6 +2860,8 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 if (out != destination) restore_predicate(1U << out);
                 break;
             }
+            // (hookshot) one word and operand()'s: a high Ra (OoT: ISETP.EQ P4, R248, 0x10) is an extended register
+            spread_scratch();
             const u32 a = operand(0, floating), b = operand(1, floating);
             const u32 combine = insn.Bits(74, 2);
             if (combine > 2) return fail(index, "native predicate combination");
