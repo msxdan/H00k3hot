@@ -61,6 +61,7 @@ inline u32 RenameableFields(u32 opcode) {
     switch (opcode) {
     case 0x381: case 0x981: return 1 | 2;   // LDG Rd, [Ra] (0x381: Ra a register pair)
     case 0x986: return 2 | 4;          // STG [Ra], Rb
+    case 0xc24: case 0xe24: return 1 | 2 | 8;   // (hookshot) IMAD Rd, Ra, and Rc or Rb at 64 (the uniform one at 32)
     default: break;
     }
     const bool three = family == 0x010 || family == 0x011 || family == 0x012 || family == 0x016 || family == 0x019 ||
@@ -72,6 +73,22 @@ inline u32 RenameableFields(u32 opcode) {
     if (form == 1) fields |= 4;                          // Rb a register
     if (three || form == 2 || form == 3) fields |= 8;     // Rc, or Rb at 64
     return fields;
+}
+// (hookshot) How many GPRs each field (16, 24, 32, 64) names where the lowering below is known to read them so: 0 no
+// GPR, ~0U not known (taken as a vector, the first of up to four). Scalar ALU fields counted as quads reached R239 or
+// the scratch registers and made the instruction rejected (OoT: IMAD R236 seen as R236-R239, CS2R R244 as R244-R247)
+inline std::array<u32, 4> FieldWidths(u32 opcode) {
+    constexpr u32 unknown = ~0U;
+    switch (opcode) {
+    case 0x805: return {2, 0, 0, 0};                                    // CS2R.64 Rd:Rd+1
+    case 0x308: return {1, 0, 1, 0};                                    // MUFU Rd, Rb
+    case 0xc24: case 0xe24: return {1, 1, 0, 1};                        // IMAD Rd, Ra, URb / Rc (uniform at 32)
+    case 0x825: return {2, 1, 0, 2};                                    // IMAD.WIDE Rd:Rd+1, Ra, imm, Rc:Rc+1
+    case 0x223: return {1, 1, 1, 1};                                    // FFMA, Rb a register
+    case 0x423: case 0x623: case 0x823: case 0xa23: case 0xc23: case 0xe23:
+        return {1, 1, 0, 1};                                            // FFMA, b not a GPR (Rb or Rc at 64)
+    default: return {unknown, unknown, unknown, unknown};
+    }
 }
 
 struct LoweredProgram {
@@ -167,11 +184,13 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         std::array<bool, 256> marker_taken{};
         {
             const u32 renameable = RenameableFields(opcode);
+            const std::array<u32, 4> widths = FieldWidths(opcode);
             constexpr u32 bits[4]{16, 24, 32, 64};
             // (a pair or quad starts at an even or a 4-aligned register: an odd one is one register, R4n+2 at most two)
             const auto span_of = [](u32 reg) { return (reg & 1) ? 1U : (reg & 2) ? 2U : 4U; };
             for (u32 f = 0; f < 4; ++f) {   // what may be native high GPRs, and which are to be renamed
                 const u32 bit = bits[f], reg = insn.Bits(bit, 8);
+                if (widths[f] == 0) continue;
                 // (ISBEWR's data too: not counted, a mesh program's output held in a high GPR was read from the plain register,
                 // never written, while what computes it wrote the extended one: vertices past the first 32 came out undefined.
                 // SUST and SURED's data as well, the same field. (amd-fix, Lichii #149) RED's too: a reduction's data in a high GPR
@@ -187,12 +206,13 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             std::array<bool, 256> named{};
             for (u32 f = 0; f < 4 && any_high; ++f) {
                 const u32 reg = insn.Bits(bits[f], 8);
-                for (u32 k = 0; k < span_of(reg) && reg + k < 255; ++k) named[reg + k] = true;
+                const u32 span = widths[f] == ~0U ? span_of(reg) : widths[f];
+                for (u32 k = 0; k < span && reg + k < 255; ++k) named[reg + k] = true;
             }
             for (u32 f = 0; f < 4 && any_high; ++f) {
                 const u32 bit = bits[f], reg = insn.Bits(bit, 8);
-                if (reg >= 255 || reg + 3 < reserved_base) continue;
-                const u32 span = span_of(reg);
+                const u32 span = widths[f] == ~0U ? span_of(reg) : widths[f];
+                if (span == 0 || reg >= 255 || reg + span <= reserved_base) continue;
                 bool reaches_scratch = reg + span > 246 || (reg <= 239 && reg + span > 239);
                 for (u32 k = 0; k < span && reg + k < 255; ++k)   // (or a number a uniform register has somewhere)
                     reaches_scratch |= avoid[reg + k];
@@ -322,6 +342,9 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                    (insn.Bits(38, 16) % 4) == 0;
         };
         std::string_view operand_error;
+        // (hookshot) the reserved registers this instruction's own lowered words name, where a case knows them: bit
+        // r - 246 for R246-R254, bit 9 for R239 (~0U: not known, any but a one-word lowering is taken to use them all)
+        u32 own_scratch = ~0U;
         const auto emit = [&](u64 word) { result.instructions.push_back(word); };
         // Bound Maxwell texture instructions share one descriptor constant buffer per program.
         const auto bind_texture_buffer = [&](u32 binding) {
@@ -2572,6 +2595,10 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 if (turns) src = to_radians(src);
                 emit(base(0x5080000000000000ULL) | (u64{src} << 8) | (u64{operation} << 20));
             }
+            // (hookshot) R250 for the half source and to_radians, R251 for a source operand(1) copies (|Rb|, -Rb, a cbuf)
+            const bool half = insn.Bits(73, 1) != 0;
+            const bool copied = !half && (opcode == 0xb08 || (opcode == 0x308 && (insn.Bits(62, 1) || insn.Bits(63, 1))));
+            own_scratch = (half || turns ? 1U << 4 : 0U) | (copied ? 1U << 5 : 0U);
             break;
         }
         case 0x526: { // IPA.PASS / CONSTANT with the attribute indexed by a uniform register
@@ -2651,9 +2678,11 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             break;
         }
         case 0x805: { // CS2R SRZ
+            // (hookshot) two moves naming only Rd and Rd+1, high ones extended registers: no scratch register of its own
             if (insn.Bits(72, 8) != 255 || !insn.Bits(80, 1) || dest >= 249) return fail(index, "native special-register read");
             mov_imm(static_cast<u32>(dest), 0);
             mov_imm(static_cast<u32>(dest) + 1, 0);
+            own_scratch = 0;
             break;
         }
         case 0x306: case 0xd06: { // I2F.F32.U8, round-to-nearest (0xd06: uniform source)
@@ -3322,6 +3351,12 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             // more than one word is taken to use them
             const size_t words = result.instructions.size() - words_before;
             bool conflict = (high_in_scratch || high_239) && words > 1;
+            if (own_scratch != ~0U) {   // (the uniform guard's and output's words: R239, R253 and R254)
+                const u32 own = own_scratch | (guarded_uniform ? (1U << 9) | (1U << 7) : 0U) |
+                                (output_mask ? (1U << 9) | (1U << 8) : 0U);
+                conflict = (own & (1U << 9)) && native_high[239];
+                for (u32 r = 246; r < 255; ++r) conflict |= (own & (1U << (r - 246))) && native_high[r];
+            }
             for (u32 r = 0; r < 255 && !conflict; ++r) conflict = (native_high[r] || marker_taken[r]) && lowering_used[r];
             if (conflict && !survey) return fail(index, "native program uses lowering scratch registers");
             RegisterRun runs[24];
