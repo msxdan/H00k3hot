@@ -2678,8 +2678,8 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             break;
         }
         case 0x805: { // CS2R SRZ
-            // (hookshot) two moves naming only Rd and Rd+1, high ones extended registers: no scratch register of its own
-            if (insn.Bits(72, 8) != 255 || !insn.Bits(80, 1) || dest >= 249) return fail(index, "native special-register read");
+            // (hookshot) two moves naming only Rd and Rd+1: high ones are extended registers (R250 too, rejected before)
+            if (insn.Bits(72, 8) != 255 || !insn.Bits(80, 1) || dest + 1 >= 255) return fail(index, "native special-register read");
             mov_imm(static_cast<u32>(dest), 0);
             mov_imm(static_cast<u32>(dest) + 1, 0);
             own_scratch = 0;
