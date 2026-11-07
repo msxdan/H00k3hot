@@ -1067,8 +1067,9 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
     const int gp_level{gp_test ? atoi(gp_test) : 3};
     // (the culling; a graphics stage with it hung the renderer at a load. RX_VK_NO_FOLLOW: none of it, as before)
     static const bool no_follow{getenv("RX_VK_NO_FOLLOW") != nullptr};
-    // (RX_VK_FOLLOW_MESH=1: the task and mesh stages too. Tried for the foliage, which it did not bring back: off)
-    static const bool no_mesh{getenv("RX_VK_FOLLOW_MESH") == nullptr};
+    // (the task and mesh stages too: the foliage's records, read by pointer. Off before PR 225 kept their structures apart, as its
+    // shaders were invalid. RX_VK_FOLLOW_MESH=0: off)
+    static const bool no_mesh{getenv("RX_VK_FOLLOW_MESH") && atoi(getenv("RX_VK_FOLLOW_MESH")) == 0};
     // (EvilOOT: vertex and fragment stages too, as the fallback only: an access no bound buffer holds read 0 there (Kokiri's
     // pond came out grey, not green). The pointer pass leaves graphics stages as they were, so what was found before still is,
     // and the menus' text stays. Not where the stage has the render area's push block: a stage has one push block.

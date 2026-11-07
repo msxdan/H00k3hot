@@ -587,7 +587,9 @@ bool MixesLoadedPointer(const IR::Value& value) {
     return merge && loaded;
 }
 
-thread_local bool g_follow_stage = false;   // (hookshot: the program being translated is compute, where the page table is)
+thread_local bool g_follow_stage = false;
+// (hookshot) The stage has the backend's page table as its fallback (spirv_emit_context.cpp's follow_pointers) and is not compute
+thread_local bool g_table_fallback = false;   // (hookshot: the program being translated is compute, where the page table is)
 
 /// Collects the storage buffer used by a global memory instruction and the instruction itself
 void CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info) {
@@ -670,6 +672,15 @@ void CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info) 
         // c1 in the address is an offset (OoT's culling passes: a pointer loaded from memory + c1[0] = 12, taken for the
         // base: their results went to a buffer at address 12). Left to the run-time search, which finds the real one.
         if (storage_buffer && storage_buffer->index == 1) {
+            storage_buffer.reset();
+        }
+        // (hookshot) Where the page table is the fallback (graphics, mesh), an address found only by the unbiased search in a
+        // constant buffer of the game's own is a guess: OoT's leaves (mesh da7a7ab2, c5+0) and grass (95db514a, c4+0x40) took
+        // floats there for the buffer, 0x42dc0000c1a00000, bound nothing and read zeros, the leaves black. The program's own
+        // address, read through the page table, is the real one. The driver's bank (c0) keeps the search. RX_VK_UNBIASED_TRACKS=1:
+        // as before
+        static const bool keep_unbiased{std::getenv("RX_VK_UNBIASED_TRACKS") != nullptr};
+        if (storage_buffer && g_table_fallback && !keep_unbiased && storage_buffer->index != 0) {
             storage_buffer.reset();
         }
         if (!storage_buffer) {
@@ -824,8 +835,16 @@ void Replace(IR::Block& block, IR::Inst& inst, const IR::U32& storage_index,
 } // Anonymous namespace
 
 void GlobalMemoryToStorageBufferPass(IR::Program& program, const HostTranslateInfo& host_info) {
-    static const bool no_mesh{std::getenv("RX_VK_FOLLOW_MESH") == nullptr};
+    // (on: the foliage's mesh programs read their records by pointer. RX_VK_FOLLOW_MESH=0: off, as before)
+    static const bool no_mesh{std::getenv("RX_VK_FOLLOW_MESH") && std::atoi(std::getenv("RX_VK_FOLLOW_MESH")) == 0};
     g_follow_stage = program.stage == Stage::Compute || (!no_mesh && (program.stage == Stage::Task || program.stage == Stage::Mesh));
+    {   // (as spirv_emit_context.cpp decides follow_pointers)
+        static const bool no_follow{std::getenv("RX_VK_NO_FOLLOW") != nullptr};
+        static const bool graphics{!std::getenv("RX_VK_FOLLOW_GRAPHICS") || std::atoi(std::getenv("RX_VK_FOLLOW_GRAPHICS")) != 0};
+        const bool graphics_stage{program.stage == Stage::VertexB || program.stage == Stage::Fragment};
+        g_table_fallback = !no_follow && ((g_follow_stage && program.stage != Stage::Compute) ||
+                                          (graphics && graphics_stage && !program.info.uses_render_area));
+    }
     g_origins.clear();   // (EvilOOT: Origins' walk, kept per program)
     StorageInfo info;
     for (IR::Block* const block : program.post_order_blocks) {
