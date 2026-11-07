@@ -2127,8 +2127,11 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             }
             break;
         }
-        case 0x91a: // DEPBAR.LE SB5, 1: scoreboard wait, represented by IR data dependencies.
-            if (insn.words[0] != 0x791a || (insn.words[1] & ~0xfc0U) != 0xd000 || insn.words[2]) {
+        case 0x91a: // DEPBAR.LE SBn, count, {list}: scoreboard wait, represented by IR data dependencies.
+            // (hookshot, from Lichii) any scoreboard (bits 44-46), count (38-43) and wait list (32-37) is the same
+            // no-op: OoT's DEPBAR.LE SB0, 0, {1,2,3(,4)} stopped 3 programs. (Lichii's MEMBAR for SB0 is for LDGSTS
+            // copy groups; LDGSTS is not lowered here, so a program with them is refused at that.)
+            if (insn.words[0] != 0x791a || (insn.words[1] & ~0x7fffU) != 0x8000 || insn.words[2]) {
                 return fail(index, "native dependency barrier mode");
             }
             break;
