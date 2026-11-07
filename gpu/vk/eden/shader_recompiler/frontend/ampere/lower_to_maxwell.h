@@ -87,6 +87,11 @@ inline std::array<u32, 4> FieldWidths(u32 opcode) {
     case 0x223: return {1, 1, 1, 1};                                    // FFMA, Rb a register
     case 0x423: case 0x623: case 0x823: case 0xa23: case 0xc23: case 0xe23:
         return {1, 1, 0, 1};                                            // FFMA, b not a GPR (Rb or Rc at 64)
+    case 0x220: case 0x221: case 0x207: case 0x208:
+        return {1, 1, 1, 0};                                            // FMUL, FADD, SEL, FSEL Rd, Ra, Rb
+    case 0x820: case 0xa20: case 0xc20: case 0x421: case 0x621: case 0x821: case 0xa21: case 0xe21:
+    case 0x807: case 0x808: case 0xa07: case 0xa08: case 0xc07: case 0xc08:
+        return {1, 1, 0, 0};                                            // and with b an immediate, cbuf or uniform
     default: return {unknown, unknown, unknown, unknown};
     }
 }
@@ -347,6 +352,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         // (hookshot) the reserved registers this instruction's own lowered words name, where a case knows them: bit
         // r - 246 for R246-R254, bit 9 for R239 (~0U: not known, any but a one-word lowering is taken to use them all)
         u32 own_scratch = ~0U;
+        u32 operand_scratch[3]{250, 251, 252};   // (hookshot: operand()'s, by operand; spread_scratch below)
         const auto emit = [&](u64 word) { result.instructions.push_back(word); };
         // Bound Maxwell texture instructions share one descriptor constant buffer per program.
         const auto bind_texture_buffer = [&](u32 binding) {
@@ -442,7 +448,21 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                     abs = insn.Bits(upper ? 74 : 62, 1); neg = insn.Bits(upper ? 75 : 63, 1);
                 }
             }
-            return materialize(kind, reg, 250 + which, floating && abs, floating && neg);
+            return materialize(kind, reg, operand_scratch[which], floating && abs, floating && neg);
+        };
+        // (hookshot) for the cases whose words name no scratch register but operand()'s: one a native high GPR of this
+        // instruction holds moves to a free one of R246-R249 (FADD R248, R248, c[..] and FSEL R251, R252, imm stopped
+        // OoT's programs), and own_scratch says which three they name
+        const auto spread_scratch = [&] {
+            std::array<bool, 256> taken{};
+            for (u32 i = 0; i < 3; ++i) {
+                if (native_high[operand_scratch[i]])
+                    for (u32 r = 249; r >= 246; --r)
+                        if (!native_high[r] && !taken[r]) { operand_scratch[i] = r; break; }
+                taken[operand_scratch[i]] = true;
+            }
+            own_scratch = 0;
+            for (u32 i = 0; i < 3; ++i) own_scratch |= 1U << (operand_scratch[i] - 246);
         };
         // (hookshot) Ampere SHF in general: (hi:lo) shifted by an immediate or a register, bits 73-74 the type (0 S64,
         // 1 U64, 2 S32, 3 U32), 75 wrap, 76 right, 80 the high word of the result. Maxwell's SHF.R gives the low
@@ -2528,6 +2548,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         }
         case 0x223: case 0x423: case 0x623: case 0x823: case 0xa23: case 0xc23: case 0xe23: { // FFMA
             if (insn.Bits(76, 1) || (insn.Bits(81, 11) & ~(opcode == 0xe23 || opcode == 0xc23 ? 0x400U : 0U))) return fail(index, "native FFMA denormal/source mode");
+            spread_scratch();
             const u32 a = operand(0), b = operand(1), c = operand(2);
             emit(base(0x5980000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) | (u64{c} << 39) |
                 (u64{insn.Bits(77, 1)} << 50) | (u64{insn.Bits(78, 2)} << 51) | (u64{insn.Bits(80, 1)} << 53));
@@ -2539,6 +2560,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 insn.Bits(87, 4) || insn.Bits(91, 1) != static_cast<u32>(opcode == 0xc20) ||
                 (scale != 4 && (!insn.Bits(80, 1) || insn.Bits(78, 2))))
                 return fail(index, "native FMUL scale/mode");
+            spread_scratch();
             const u32 a = operand(0), b = operand(1);
             emit(base(0x5c68000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) |
                 (u64{insn.Bits(78, 2)} << 39) | (u64{std::array<u32, 8>{0, 3, 2, 1, 0, 6, 5, 4}[scale]} << 41) | (u64{insn.Bits(80, 1)} << 44) | (u64{insn.Bits(77, 1)} << 50));
@@ -2547,6 +2569,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         case 0x221: case 0x421: case 0x621: case 0x821: case 0xa21: case 0xe21: { // FADD
             if (insn.Bits(81, 10) || insn.Bits(91, 1) != static_cast<u32>(opcode == 0xe21))
                 return fail(index, "native FADD mode");
+            spread_scratch();
             const u32 a = operand(0), b = operand(insn.Bits(9, 3) == 2 || insn.Bits(9, 3) == 3 || insn.Bits(9, 3) == 7 ? 2 : 1);
             emit(base(0x5c58000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) |
                 (u64{insn.Bits(78, 2)} << 39) | (u64{insn.Bits(80, 1)} << 44) | (u64{insn.Bits(77, 1)} << 50));
@@ -2721,6 +2744,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
         case 0x208: case 0x808: case 0xa08: case 0xc08: { // Bitwise SEL / FSEL
             // FSEL applies the floating operand modifiers (negate/absolute) before selecting.
             const bool floating = (opcode & 0x1ff) == 0x008;
+            spread_scratch();
             const u32 a = operand(0, floating), b = operand(1, floating);
             emit(base(0x5ca0000000000000ULL) | (u64{a} << 8) | (u64{b} << 20) |
                 (u64{insn.Bits(87, 3)} << 39) | (u64{insn.Bits(90, 1)} << 42));
