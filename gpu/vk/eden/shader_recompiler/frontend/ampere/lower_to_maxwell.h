@@ -2668,9 +2668,15 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             const u32 shift = uniform_register(insn.Bits(32, 8)), high = uniform_register(insn.Bits(64, 8));
             const bool right = insn.Bits(76, 1) != 0, high_result = insn.Bits(80, 1) != 0;
             if (dst == ~0U || dst == 255 || low == ~0U || shift == ~0U || high == ~0U ||
-                (native_predicate != 7 && !guarded_uniform) || insn.Bits(73, 2) != 3 ||
-                (insn.words[2] & ~0x000118ffU) != 0x08000600U)
+                (native_predicate != 7 && !guarded_uniform))
                 return fail(index, "native uniform register shift mode");
+            if (insn.Bits(73, 2) != 3 || (insn.words[2] & ~0x000118ffU) != 0x08000600U) {
+                // (hookshot) any type, both words, wrap: the general funnel shift, as SHF's 0x219 (OoT: USHF.R.U64
+                // UR22, UR21, UR23, UR21, a rotate, and UR18, UR18, UR32, UR19, a 64-bit shift's low word)
+                if (insn.words[2] & ~0x08011effU) return fail(index, "native uniform register shift mode");
+                funnel(dst, low, high, true, shift, insn.Bits(73, 2), right, high_result, insn.Bits(75, 1) != 0);
+                break;
+            }
             u32 source;
             if (high_result && low == 255) source = high;        // (high:0) >> or << s, high word
             else if (!high_result && high == 255) source = low;  // (0:low) >> or << s, low word
