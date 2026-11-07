@@ -78,20 +78,39 @@ void WriteStorageByCasLoop(EmitContext& ctx, const IR::Value& binding, const IR:
 }
 } // Anonymous namespace
 
-void EmitLoadGlobalU8(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+namespace {
+// (hookshot) An 8- or 16-bit load from global memory: the aligned word that holds it, through the 32-bit load (a bound
+// buffer, or the page table), and its bits. Eden threw for these: OoT's foliage mesh programs read 16-bit values by
+// pointer, and each such program was left untranslated, its draws gone. The GPU's own loads are aligned to their size,
+// so the value never crosses a word
+Id LoadGlobalSmall(EmitContext& ctx, Id address, u32 bits, bool is_signed) {
+    if (!ctx.profile.support_int64) {
+        LOG_WARNING(Shader_SPIRV, "Int64 not supported, ignoring memory operation");
+        return ctx.Const(0u);
+    }
+    const Id word_address{ctx.OpBitwiseAnd(ctx.U64, address, ctx.Constant(ctx.U64, ~u64{3}))};
+    const Id word{ctx.OpFunctionCall(ctx.U32[1], ctx.load_global_func_u32, word_address)};
+    const Id byte{ctx.OpUConvert(ctx.U32[1], ctx.OpBitwiseAnd(ctx.U64, address, ctx.Constant(ctx.U64, u64{3})))};
+    const Id bit_offset{ctx.OpShiftLeftLogical(ctx.U32[1], byte, ctx.Const(3u))};
+    return is_signed ? ctx.OpBitFieldSExtract(ctx.U32[1], word, bit_offset, ctx.Const(bits))
+                     : ctx.OpBitFieldUExtract(ctx.U32[1], word, bit_offset, ctx.Const(bits));
+}
+} // Anonymous namespace
+
+Id EmitLoadGlobalU8(EmitContext& ctx, Id address) {
+    return LoadGlobalSmall(ctx, address, 8, false);
 }
 
-void EmitLoadGlobalS8(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+Id EmitLoadGlobalS8(EmitContext& ctx, Id address) {
+    return LoadGlobalSmall(ctx, address, 8, true);
 }
 
-void EmitLoadGlobalU16(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+Id EmitLoadGlobalU16(EmitContext& ctx, Id address) {
+    return LoadGlobalSmall(ctx, address, 16, false);
 }
 
-void EmitLoadGlobalS16(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+Id EmitLoadGlobalS16(EmitContext& ctx, Id address) {
+    return LoadGlobalSmall(ctx, address, 16, true);
 }
 
 Id EmitLoadGlobal32(EmitContext& ctx, Id address) {

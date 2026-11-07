@@ -632,7 +632,11 @@ void CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info) 
         const IR::Opcode op{inst.GetOpcode()};
         // (and the writes and 32-bit atomics through such an address: the culling's outputs and counters, which the backend's page
         // table now reaches too. Tracked to the constant buffer alone they went to a buffer at address 0, and every count stayed 0)
-        const bool load{op == IR::Opcode::LoadGlobal32 || op == IR::Opcode::LoadGlobal64 || op == IR::Opcode::LoadGlobal128};
+        // (and the 8- and 16-bit loads: the foliage's mesh programs read 16-bit values by pointer, and the backend reads them
+        // through the 32-bit load, page table and all)
+        const bool load{op == IR::Opcode::LoadGlobal32 || op == IR::Opcode::LoadGlobal64 || op == IR::Opcode::LoadGlobal128 ||
+                        op == IR::Opcode::LoadGlobalU8 || op == IR::Opcode::LoadGlobalS8 || op == IR::Opcode::LoadGlobalU16 ||
+                        op == IR::Opcode::LoadGlobalS16};
         const bool store{op == IR::Opcode::WriteGlobal32 || op == IR::Opcode::WriteGlobal64 || op == IR::Opcode::WriteGlobal128 ||
                          op == IR::Opcode::GlobalAtomicIAdd32 || op == IR::Opcode::GlobalAtomicUMax32 || op == IR::Opcode::GlobalAtomicUMin32 ||
                          op == IR::Opcode::GlobalAtomicSMax32 || op == IR::Opcode::GlobalAtomicSMin32 || op == IR::Opcode::GlobalAtomicAnd32 ||
