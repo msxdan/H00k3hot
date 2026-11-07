@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "vk_loader.h"
@@ -16,6 +17,9 @@ namespace mkwvk {
 
 extern const MkwVkHost* host;
 void logf(const char* fmt, ...);
+/// Where the renderer keeps a file it writes (its caches, the Insert menu's options): beside the executable, or on Linux
+/// $XDG_CACHE_HOME/hookshot (~/.cache/hookshot) when the game folder cannot be written (vk_draw.cpp)
+std::string writable_path(const char* name);
 
 struct Device {
     VkInstance instance = VK_NULL_HANDLE;

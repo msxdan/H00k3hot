@@ -771,10 +771,7 @@ void disk_init() {
     static std::once_flag once;
     std::call_once(once, [] {
         if (getenv("RX_VK_NO_PROGRAM_CACHE")) return;
-        char exe[MAX_PATH];
-        const DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
-        std::string path(exe, n);
-        path = path.substr(0, path.find_last_of("\\/") + 1) + "hookshot_programs.bin";
+        const std::string path = writable_path("hookshot_programs.bin");
         const uint64_t stamp = disk_stamp();
         int64_t good = 0, whole = 0;
         if (FILE* f = fopen(path.c_str(), "rb")) {
@@ -804,6 +801,7 @@ void disk_init() {
             disk_out = fopen(path.c_str(), "ab");
         } else {
             disk_out = fopen(path.c_str(), "wb");
+            if (!disk_out) logf("vk: %s cannot be written: translated programs are not kept for the next start", path.c_str());
             if (disk_out) {
                 const uint32_t h[2] = {kDiskMagic, 0};
                 fwrite(h, 4, 2, disk_out);

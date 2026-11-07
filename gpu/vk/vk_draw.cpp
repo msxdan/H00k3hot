@@ -5,7 +5,8 @@
 // and storage images as views of vk_texture.cpp's images, texel buffers), passes kept open while the targets stay,
 // and the draws themselves.
 //
-// Pipelines persist in a VkPipelineCache next to the executable (mkw_vk_pipelines.bin).
+// Pipelines persist in a VkPipelineCache next to the executable (mkw_vk_pipelines.bin; writable_path: on Linux, ~/.cache/hookshot
+// when the game folder is read-only).
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -21,6 +22,10 @@
 #include <map>
 #include <vector>
 #include <thread>
+#ifndef _WIN32
+#include <sys/stat.h>   // (writable_path)
+#include <unistd.h>
+#endif
 
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 
@@ -41,6 +46,38 @@
 
 namespace mkwvk {
 uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uint32_t offset);   // (vk_shader.cpp)
+// (linux) The game folder may be read-only (installed for all users, or run in a sandbox): every cache write there failed
+// without a word, and each run translated and built everything again. Such a folder's files go to $XDG_CACHE_HOME/hookshot
+// (~/.cache/hookshot) instead; a writable folder keeps them beside the executable, as on Windows
+std::string writable_path(const char* name) {
+    char exe[MAX_PATH];
+    const DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
+    std::string dir(exe, n);
+    dir = dir.substr(0, dir.find_last_of("\\/") + 1);
+#ifndef _WIN32
+    static const std::string cache = [&dir]() -> std::string {
+        if (access(dir.c_str(), W_OK) == 0) return "";
+        const char *xdg = getenv("XDG_CACHE_HOME"), *home = getenv("HOME");
+        std::string c = xdg && xdg[0] == '/' ? std::string(xdg) : home && home[0] == '/' ? std::string(home) + "/.cache" : "";
+        if (c.empty()) {
+            logf("vk: %s cannot be written and there is no $XDG_CACHE_HOME or $HOME: no caches are kept", dir.c_str());
+            return "";
+        }
+        mkdir(c.c_str(), 0755);
+        c += "/hookshot";
+        mkdir(c.c_str(), 0755);
+        if (access(c.c_str(), W_OK) != 0) {
+            logf("vk: neither %s nor %s can be written: no caches are kept", dir.c_str(), c.c_str());
+            return "";
+        }
+        logf("vk: %s cannot be written: caches and options in %s", dir.c_str(), c.c_str());
+        return c + "/";
+    }();
+    if (!cache.empty()) return cache + name;
+#endif
+    return dir + name;
+}
+
 namespace {
 
 bool no_a2c() {   // (RX_VK_NO_A2C, read once: it was a getenv on every alpha-to-coverage draw, the foliage's)
@@ -331,11 +368,7 @@ std::string pcache_path;
 std::atomic<int64_t> pcache_built_since_save{0};
 void pcache_init() {
     if (pcache) return;
-    char exe[MAX_PATH];
-    const DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
-    std::string dir(exe, n);
-    dir = dir.substr(0, dir.find_last_of("\\/") + 1);
-    pcache_path = dir + "mkw_vk_pipelines.bin";
+    pcache_path = writable_path("mkw_vk_pipelines.bin");
     std::vector<uint8_t> data;
     if (FILE* f = fopen(pcache_path.c_str(), "rb")) {
         fseek(f, 0, SEEK_END);
@@ -478,12 +511,7 @@ struct PipeNote {
 std::mutex note_mu;
 FILE* note_file = nullptr;
 std::unordered_set<uint64_t> noted;   // (a pipeline once in the file, however many runs meet it)
-std::string pipe_notes_path() {
-    char exe[MAX_PATH];
-    const DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
-    std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1) + "hookshot_pipelines.bin";
-}
+std::string pipe_notes_path() { return writable_path("hookshot_pipelines.bin"); }
 void pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo) {
     static const bool off = getenv("RX_VK_NO_PROGRAM_CACHE") != nullptr;
     if (off) return;
@@ -514,6 +542,7 @@ void pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targ
             }
         }
         note_file = fopen(path.c_str(), same ? "ab" : "wb");
+        if (!note_file) logf("vk: %s cannot be written: the pipelines met are not kept for the next start", path.c_str());
         if (note_file && !same) {
             const uint64_t h[2] = {stamp, sizeof(PipeNote)};
             fwrite(h, 8, 2, note_file);
@@ -3585,10 +3614,7 @@ bool precompile_wanted() {
 /// Every shader of the game, before its first start (vk_shader.cpp, the seed): once for this translator
 void prepare_run(void (*progress)(size_t done, size_t total)) {
     const auto t0 = std::chrono::steady_clock::now();
-    char exe[MAX_PATH];
-    const DWORD exe_n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
-    std::string path(exe, exe_n);
-    path = path.substr(0, path.find_last_of("\\/") + 1) + "hookshot_prepared.bin";
+    const std::string path = writable_path("hookshot_prepared.bin");
     const uint64_t stamp = program_cache_stamp();
     if (FILE* f = fopen(path.c_str(), "rb")) {
         uint64_t have = 0;
@@ -4107,6 +4133,9 @@ void pipeline_cache_save(bool force) {
                     const bool ok = fwrite(data.data(), 1, n, f) == n;
                     fclose(f);
                     if (ok) MoveFileExA(tmp.c_str(), pcache_path.c_str(), MOVEFILE_REPLACE_EXISTING);
+                } else {
+                    static std::atomic<bool> told{false};
+                    if (!told.exchange(true)) logf("vk: %s cannot be written: the pipeline cache is not kept", tmp.c_str());
                 }
             }
         }

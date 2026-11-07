@@ -78,12 +78,7 @@ constexpr int kMenuWidth = 360;   // (at a scale of 1: 720 lines)
 std::atomic<bool> open_now{false};
 int selected = 0;
 bool menu_refresh = false;
-std::string ini_path() {
-    char exe[MAX_PATH];
-    const DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
-    std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1) + "hookshot_options.ini";
-}
+std::string ini_path() { return writable_path("hookshot_options.ini"); }
 const char* ini_key(const Row& r) {
     static char k[32];
     size_t n = 0;
@@ -95,6 +90,8 @@ void save() {
     if (FILE* f = fopen(ini_path().c_str(), "w")) {
         for (const Row& r : rows) fprintf(f, "%s=%d\n", ini_key(r), *r.value);
         fclose(f);
+    } else {
+        logf("vk: %s cannot be written: the options are not kept", ini_path().c_str());
     }
 }
 
