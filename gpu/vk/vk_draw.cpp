@@ -1275,6 +1275,13 @@ struct BankCache {
     std::vector<uint8_t> bytes;
 };
 thread_local BankCache bank_cache[2][kNvnStages];   // [c0 or c2][NVN stage]: the last upload (draws in a row share most of it)
+// (AyyBeeDee20738, PR 252) An indirect dispatch's grid as its program reads it from c0+0..0xc. dispatch() fills it from guest memory
+// as the recording sees it, but OoT's foliage culling chains write the next pass's group counts on the GPU in the same frame: the
+// program read stale counts (its own work bounds) and culled the forest. grid_patch_want: c0 gets an upload of its own,
+// grid_patch_at, into which dispatch() copies the 12 bytes of arguments on the GPU just before the dispatch, as the console's
+// hardware sees them. RX_VK_NO_GRID_PATCH=1: as before
+thread_local bool grid_patch_want = false;
+thread_local uint64_t grid_patch_at = UINT64_MAX;
 
 VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_t index) {
     VkDescriptorBufferInfo bi{VK_NULL_HANDLE, 0, VK_WHOLE_SIZE};
@@ -1283,6 +1290,14 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
     if (index == 0 || index == 2) {   // the driver's banks: only what the program reads of them
         const uint32_t n = std::clamp<uint32_t>((used + 15) & ~15u, 16, 0xA00);
         BankCache& c = bank_cache[index == 2][std::clamp(st.nvn_stage, 0, kNvnStages - 1)];
+        if (index == 0 && st.nvn_stage == 5 && grid_patch_want) {   // (PR 252) an upload of its own, patched on the GPU
+            const uint64_t at = stream_alloc(n, align);
+            if (at == UINT64_MAX) return bi;
+            driver_bank_fill(s, 0, 5, cur->mapped + at, n);
+            grid_patch_at = at;
+            c.at = UINT64_MAX;   // (not shared: its first words change on the GPU)
+            return {cur->stream, at, n};
+        }
         const bool grid_same = st.nvn_stage != 5 || !std::memcmp(c.grid, s.grid, sizeof c.grid);
         static const bool no_bank_cache = getenv("RX_VK_NO_DESC_REUSE") != nullptr;   // (A/B: filled every time)
         if (!no_bank_cache && c.at != UINT64_MAX && c.bind_gen == s.bind_gen && grid_same && c.size >= n)
@@ -4844,7 +4859,10 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     if (plk.on) par_mutex().unlock(), plk.on = false;
     dclock.t_pipe = slow_dispatch_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     end_pass(cmd);
+    static const bool no_grid_patch = getenv("RX_VK_NO_GRID_PATCH") != nullptr;
+    grid_patch_want = indirect && !no_grid_patch, grid_patch_at = UINT64_MAX;
     build_descriptors(s, p);
+    grid_patch_want = false;
     dclock.t_desc = slow_dispatch_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     if (dump_on())
         logf("vk: dump-in %03d dispatch %ux%ux%u prog %016llx:%s", dump_seq(), x, y, z, (unsigned long long)p.key,
@@ -4945,6 +4963,18 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         if (indirect) {
             BufferRef args = gpu_buffer_bind(indirect, 12, false);
             if (!args) SKIP_HERE();
+            if (grid_patch_at != UINT64_MAX) {   // (PR 252) the grid as the GPU has it, into the program's c0 (full_barrier above:
+                // the pass that wrote the arguments is done)
+                const VkBufferCopy cp{args.offset, grid_patch_at, 12};
+                vkCmdCopyBuffer(cmd, args.buffer, cur->stream, 1, &cp);
+                VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+                b.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT, b.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, b.dstAccessMask = VK_ACCESS_2_UNIFORM_READ_BIT;
+                VkDependencyInfo d{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+                d.memoryBarrierCount = 1, d.pMemoryBarriers = &b;
+                vkCmdPipelineBarrier2(cmd, &d);
+                grid_patch_at = UINT64_MAX;
+            }
             vkCmdDispatchIndirect(cmd, args.buffer, args.offset);
         } else {
             vkCmdDispatch(cmd, x, y, z);
