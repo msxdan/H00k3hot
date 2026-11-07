@@ -3205,9 +3205,11 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 break;
             }
             // (hookshot) the link's MOV (the return PC into Rlink) up to sixteen instructions back, those between
-            // writing other registers and not branching (OoT's mesh programs set it ten instructions before)
+            // writing other registers and not branching (OoT's mesh programs set it ten instructions before). Up to
+            // 32 back (others 18 and 28 before: 3 programs) only where no branch lands in between and no
+            // instruction there may write Rlink, any destination taken as the first of a vector (as span_of)
             u32 setup = index;
-            for (u32 back = 1; back <= 16 && back <= index; ++back) {
+            for (u32 back = 1; back <= 32 && back <= index; ++back) {
                 const Instruction& prior = code[index - back];
                 if ((prior.words[0] & ~0x00ff0000U) == 0x00007802 && prior.Bits(16, 8) < 250 &&
                     prior.words[1] == (index + 1) * 16 && prior.words[2] == 0xf00) {
@@ -3222,6 +3224,21 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             for (u32 k = setup + 1; !clobbered && k < index; ++k)
                 clobbered = code[k].Bits(16, 8) == code[setup].Bits(16, 8) ||
                             (code[k].Bits(16, 8) + 1 == code[setup].Bits(16, 8) && code[k].Bits(0, 12) == 0x225);
+            if (!clobbered && index - setup > 16) {
+                const u32 link = code[setup].Bits(16, 8);
+                for (u32 k = setup + 1; !clobbered && k < index; ++k) {
+                    const u32 d = code[k].Bits(16, 8);
+                    clobbered = d <= link && link < d + ((d & 1) ? 1U : (d & 2) ? 2U : 4U);
+                }
+                for (u32 k = 0; !clobbered && k < code.size(); ++k) {
+                    const u32 op = code[k].Bits(0, 12);
+                    if (op == 0x949 || op == 0x958) clobbered = true;   // (a jump table: its targets unknown here)
+                    if (op != 0x944 && op != 0x947) continue;
+                    const u64 to = code[k].words[1] | (u64{code[k].words[2] & 0x3ffff} << 32);
+                    const s64 target = s64{k} * 16 + 16 + (static_cast<s64>(to << 14) >> 14);
+                    clobbered = target > s64{setup} * 16 && target <= s64{index} * 16;
+                }
+            }
             if (main_exited || index == 0 || insn.words[0] != 0x7944 ||
                 (insn.words[2] & ~0x3ffffU) != 0x03c00000 || clobbered)
                 return fail(index, "native call linkage mode");
