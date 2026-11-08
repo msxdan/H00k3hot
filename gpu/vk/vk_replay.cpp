@@ -1577,13 +1577,13 @@ void bench_frame(int64_t presents) {
     const size_t ub_before = ub_updates.size();
     queue_flush();
     for (int i = 0; i < times; i++) {
-        vkDeviceWaitIdle(dev.device);
+        { std::lock_guard pq(dev.present_queue_mu); vkDeviceWaitIdle(dev.device); }
         ub_updates.resize(ub_before);   // (the last time's uniform updates are written: as if pruned)
         const auto t0 = std::chrono::steady_clock::now();
         for (const auto& h : frame_submits) bench_replay(h);
         ms.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
     }
-    vkDeviceWaitIdle(dev.device);
+    { std::lock_guard pq(dev.present_queue_mu); vkDeviceWaitIdle(dev.device); }
     prof_full--;
     int64_t draws1 = 0;
     draw_stats(&draws1, &sk, &di, &pl);

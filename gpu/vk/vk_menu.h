@@ -7,6 +7,7 @@ namespace mkwvk {
 
 // (out of the box every feature is off: what the game does on its own. The ini beside the executable keeps a player's choices)
 struct Options {
+    int dlss5 = 0;        // (linux) DLSS 5, through the DLSS5VKLayer Vulkan layer the player installs (vk_main.cpp)
     int framegen = 0;     // made frames: 0 off, or 2, 3, 4 times the game's frames
     int pace = 0;         // frames shown on an even line (vk_framegen.cpp)
     int resolution = 0;   // the 3D's: 0 Auto (the game's dynamic resolution), else 100%, 75%, 67%, 50% of its full scale (nx2/oot_patches.py)
@@ -40,6 +41,7 @@ bool preset_caps_memory();
 
 void menu_init();             // (the options from the file, once)
 void menu_set_gpu_count(int count);
+void menu_set_dlss5_layer(bool found);   // (vk_main.cpp: whether the DLSS 5 row's Vulkan layer is installed)
 void menu_tick();             // (each frame shown: the keys, while the game's window has the focus)
 bool menu_is_open();
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)

@@ -16,6 +16,7 @@
 #define VKX_GLOBAL(X)                                                                                                 \
     X(vkCreateInstance)                                                                                               \
     X(vkEnumerateInstanceExtensionProperties)                                                                         \
+    X(vkEnumerateInstanceLayerProperties)                                                                             \
     X(vkEnumerateInstanceVersion)
 
 #define VKX_INSTANCE(X)                                                                                               \

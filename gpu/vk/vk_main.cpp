@@ -106,6 +106,23 @@ bool create_instance() {
             if (has_extension(all, want)) exts[n_exts++] = want;
     }
 #endif
+#ifndef _WIN32
+    // (the Insert menu's DLSS 5: DLSS5VKLayer, a Vulkan layer the player installs apart from Hookshot, which runs NVIDIA's model on
+    // each presented frame. It turns on by this variable, read when the instance is made)
+    menu_init();
+    if (opts.dlss5) setenv("VKLayer_DLSS5", "1", 1);
+    {
+        uint32_t n = 0;
+        vkEnumerateInstanceLayerProperties(&n, nullptr);
+        std::vector<VkLayerProperties> layers(n);
+        vkEnumerateInstanceLayerProperties(&n, layers.data());
+        bool found = false;
+        for (const VkLayerProperties& l : layers) found |= !strcmp(l.layerName, "VK_LAYER_NV_dlssnr");
+        menu_set_dlss5_layer(found);
+        dev.dlss5_layer = opts.dlss5 && found;
+        if (opts.dlss5) logf("vk: DLSS 5 is on in the menu; its layer (DLSS5VKLayer) is %s", found ? "installed" : "not installed: no effect");
+    }
+#endif
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "mkw-recomp";
     app.apiVersion = VK_API_VERSION_1_3;
@@ -246,11 +263,15 @@ bool create_device() {
             (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
             dev.queue_family = i;
     if (dev.queue_family == UINT32_MAX) return false;
-    const float priority = 1.0f;
+    // (a second queue for the presents with DLSS 5 on, RX_VK_ASYNC_PRESENT=0/1 to choose. The layer does its work in the present,
+    // about 13 ms at 1440p, and that held the one queue, and with it every submit of the game's, for as long as it took)
+    const float priorities[2] = {1.0f, 1.0f};
+    const char* async_env = getenv("RX_VK_ASYNC_PRESENT");
+    const bool separate_present = (async_env ? atoi(async_env) != 0 : dev.dlss5_layer) && families[dev.queue_family].queueCount >= 2;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     q.queueFamilyIndex = dev.queue_family;
-    q.queueCount = 1;
-    q.pQueuePriorities = &priority;
+    q.queueCount = separate_present ? 2 : 1;
+    q.pQueuePriorities = priorities;
     // (hookshot) The presents on a queue of a compute family of their own, beside the replay's (RX_VK_PRESENT_QUEUE=1 / 0: on /
     // off; on by default with NVIDIA's driver on Windows, where it was measured). On the replay's queue vkQueuePresentKHR blocked
     // with dev.present_mu held, ~0.8 ms a present with frame interpolation at 4x and up to 8, and the game's main and presentation
@@ -272,6 +293,7 @@ bool create_device() {
         (void)dp;       //  NVIDIA's driver on Windows. RX_VK_PRESENT_QUEUE=1: on)
 #endif
         if (const char* e = getenv("RX_VK_PRESENT_QUEUE")) want = atoi(e) != 0;
+        if (separate_present) want = false;   // (DLSS 5's second queue is the presents' already: the model is tested on it)
         for (uint32_t i = 0; want && i < n && compute_family == UINT32_MAX; i++)
             if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))
                 compute_family = i;
@@ -279,7 +301,7 @@ bool create_device() {
     VkDeviceQueueCreateInfo qs[2] = {q, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
     qs[1].queueFamilyIndex = compute_family;
     qs[1].queueCount = 1;
-    qs[1].pQueuePriorities = &priority;
+    qs[1].pQueuePriorities = priorities;
 
     // features: what the hardware has of what the replay uses (all of them on the GPUs MKW-class hardware maps to)
     VkPhysicalDeviceMeshShaderFeaturesEXT mesh{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
@@ -413,6 +435,7 @@ bool create_device() {
     dev.present_queue = VK_NULL_HANDLE;
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;
+    if (separate_present) vkGetDeviceQueue(dev.device, dev.queue_family, 1, &dev.present_queue);
     if (dev.buffer_marker) buffer_markers_init();
     coopmat_init();
     if (dev.push_descriptor) {

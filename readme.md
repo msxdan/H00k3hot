@@ -199,6 +199,7 @@ and the right one closes the menu. Your choices are saved in `hookshot_options.i
 | | Sharpness | 0 to 100%, in steps of 10 | 0% |
 | | Handheld profile | Off, On (after a restart) | Off |
 | | Ultrawide | 16:9, Monitor's shape (after a restart) | 16:9 |
+| | DLSS 5 (Linux) | Off, On (after a restart) | Off |
 | | Robust buffers | Auto, Off, On (after a restart) | Auto |
 | Gameplay | FPS counter | Off, On | Off |
 | | Game speed | Per frame, Real time | Real time |
@@ -226,6 +227,8 @@ and the right one closes the menu. Your choices are saved in `hookshot_options.i
   render targets get a bigger GPU pool, so a full-size 3D fits. `HOS_OUTPUT_RES=0/1/2` sets it for one run.
 - **Upscaling** and **Sharpness** also work when Frame generation is Off.
 - **Handheld profile** runs the game as if the console were undocked: lower resolution, lighter on the GPU.
+- **DLSS 5** (Linux, RTX 50 cards) applies NVIDIA's neural rendering to each frame. It needs software that does not come
+  with Hookshot: see [DLSS 5 on Linux](#dlss-5-on-linux). The row says when it is not installed.
 - **Robust buffers:** a read past a buffer's end is dropped instead of stopping the GPU. Auto is on, on every card; Off
   can be faster on some NVIDIA cards.
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed
@@ -237,6 +240,22 @@ and the right one closes the menu. Your choices are saved in `hookshot_options.i
   place of the right stick. The <kbd>-</kbd> and <kbd>=</kbd> keys change the sensitivity in game too.
 - **Layout preset:** Nintendo has A on the right face button, Xbox / PC and Swap Face put A on the bottom one. Changing
   a button yourself sets it to Custom.
+
+### DLSS 5 on Linux
+
+Optional, for RTX 50 cards. Nothing of it is part of Hookshot, and NVIDIA's model cannot be shared with the game, so each
+player sets it up once:
+
+1. Install [DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) (AGPL-3.0, experimental, a separate program): download
+   the `linux-x86_64` tarball from its releases and run `./install.sh --user`. It needs Wine or a Proton with DXVK-NVAPI,
+   such as Proton-CachyOS or Proton-GE.
+2. Give it NVIDIA's model: `nvngx_dlssnr.dll`, from a game you own that has DLSS 5. Find that file in the game's folder and
+   run `dlssnr-helper import-binaries <the folder that holds it>`. `dlssnr-helper doctor` says what is still missing.
+3. Run `dlssnr-helper start` before the game (`dlssnr-helper stop` afterwards).
+4. In the game, set **DLSS 5** to On in the Graphics tab and restart it.
+
+It costs frame rate, and Frame generation multiplies its work, so leave that Off. While it is on, presents get a queue and a
+thread of their own, so the layer's work does not hold the game back (`RX_VK_ASYNC_PRESENT=0` to compare).
 
 ### Controls
 

@@ -109,6 +109,8 @@ const char* tx_text_speed(int v) {
     return t[v];
 }
 const char* tx_handheld(int v) { return v ? "On (restart)" : "Off (restart)"; }
+bool dlss5_layer_found = false;
+const char* tx_dlss5(int v) { return !v ? "Off (restart)" : dlss5_layer_found ? "On (restart)" : "On (not installed)"; }
 const char* tx_ultrawide(int v) { return v ? "Monitor's shape (restart)" : "16:9 (restart)"; }
 int gpu_device_at_start = 0;   // (the row's value the game started with: menu_set_gpu_count)
 const char* tx_gpu(int v) {
@@ -196,6 +198,11 @@ Row rows[] = {
      "Runs the game as if the console were undocked: lower resolutions, lighter on the GPU. Applies after a restart."},
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "Monitor's shape widens the camera to fill a screen wider than 16:9. The HUD is still stretched. Applies after a restart."},
+#ifndef _WIN32
+    {TAB_GRAPHICS, "DLSS 5", &opts.dlss5, 0, 1, 1, tx_dlss5,
+     "NVIDIA's neural rendering, for RTX 50 cards: richer light and materials, at a cost in frame rate. Needs DLSS5VKLayer, installed "
+     "apart from Hookshot, with its helper running. Frame generation multiplies its work. Applies after a restart."},
+#endif
     {TAB_GRAPHICS, "Robust buffers", &opts.robust, 0, 2, 1, tx_robust,
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Auto is on, on every card; "
      "Off can be faster on some NVIDIA cards. Applies after restart."},
@@ -460,7 +467,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         *r.value = v > r.hi ? r.lo : v < r.lo ? r.hi : v;
         if (r.value != &opts.fullscreen && r.value != &opts.show_fps && r.value != &opts.gpu_device &&
             r.value != &opts.invert_cam_x && r.value != &opts.invert_cam_y && r.value != &opts.mouse_native &&
-            r.value != &opts.mouse_sens && r.value != &opts.mouse_invert) {   // (the controls are not the preset's)
+            r.value != &opts.mouse_sens && r.value != &opts.mouse_invert && r.value != &opts.dlss5) {   // (the controls are not the preset's)
             opts.preset = 0; // Custom
             sync_preset_budgets(0);
         }
@@ -1149,6 +1156,8 @@ int resolution_scale() {
     const float s = opts.resolution > 0 && opts.resolution <= 4 ? kResPercent[opts.resolution] / 100.0f : 0;
     return s > 0 ? (int)(twelfths(s) * 10000.0f / 12.0f + 0.5f) : 0;   // (the twelfth game_size labels)
 }
+
+void menu_set_dlss5_layer(bool found) { dlss5_layer_found = found; }
 
 void menu_set_gpu_count(int count) {
     for (Row& r : rows) {
