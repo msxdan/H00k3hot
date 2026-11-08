@@ -1712,6 +1712,16 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     // the rainbow sky)
     const uint32_t since = tex->gpu_written && tex->released ? std::max(tex->upload_gen, tex->release_gen) : tex->upload_gen;
     if (tex->uploaded && !gpu_dirty && !texture_dirty(*tex, since, dirty)) return tex;
+    // (hookshot) RX_VK_KEEP_DRAWN=1: an image the GPU drew and the game finalized keeps its texels when the CPU writes into
+    // its storage after (test: OoT's 384x216 scene chain took 266 KB of CPU writes over it in bursts, the fog came and went)
+    static const bool keep_drawn = getenv("RX_VK_KEEP_DRAWN") && getenv("RX_VK_KEEP_DRAWN")[0] == '1';
+    if (keep_drawn && tex->uploaded && !gpu_dirty && tex->gpu_written && tex->released) {
+        static int logged;
+        if (logged++ < 40)
+            logf("vk: keep drawn: #%u %#llx %ux%u NVN %#x, CPU writes into it after it was drawn not uploaded", tex->id,
+                 (unsigned long long)tex->gpu, tex->width, tex->height, tex->nvn_format);
+        return tex;
+    }
     const uint32_t gen = memory_generation();
     // (storage render targets took last, which the CPU has not written since: nothing to upload, the memory holds
     // nothing the GPU's images did not replace. The game's transient heaps move with the dynamic resolution, and a
