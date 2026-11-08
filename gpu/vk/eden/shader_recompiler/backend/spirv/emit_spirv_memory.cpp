@@ -147,7 +147,9 @@ void WriteGlobalNarrow(EmitContext& ctx, Id address, Id value, u32 bits) {
     }
     const Id low{ctx.OpUConvert(ctx.U32[1], ctx.OpBitwiseAnd(ctx.U64, address, ctx.Constant(ctx.U64, u64{3})))};
     const Id bit_offset{ctx.OpShiftLeftLogical(ctx.U32[1], low, ctx.Const(3u))};
-    ctx.OpFunctionCall(ctx.TypeVoid(), ctx.write_global_cas_loop_func, address, value, bit_offset, ctx.Const(bits));
+    // (the word's own address: the page table's 32-bit atomic, and its fit check, take an aligned one)
+    const Id aligned{ctx.OpBitwiseAnd(ctx.U64, address, ctx.Constant(ctx.U64, u64{~u64{3}}))};
+    ctx.OpFunctionCall(ctx.TypeVoid(), ctx.write_global_cas_loop_func, aligned, value, bit_offset, ctx.Const(bits));
 }
 } // Anonymous namespace
 

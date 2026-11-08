@@ -1423,7 +1423,8 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
         }};
         define_body(&StorageDefinitions::U32, addr, storage_types.U32.element, 2,
                     [&](Id ssbo_pointer) { cas_loop(ssbo_pointer); }, false);
-        guest_lookup(addr, 4U, [&](Id target) {
+        // (as the 32-bit stores: through the page table only with RX_VK_FOLLOW_STORES=1, #132)
+        if (follow_stores) guest_lookup(addr, 4U, [&](Id target) {
             if (gp_level >= 3) {
                 cas_loop(psb_member(U32[1], target));
             } else {
