@@ -2266,6 +2266,7 @@ void texture_written(Texture* tex) {
     watch_tex(tex, "written");
     if (!tex->gpu_written || tex->released) tex->first_written = frame_no;
     tex->last_written = frame_no;
+    tex->drawn_value = rec_value;
     tex->gpu_written = true;
     tex->gpu_gen = memory_generation();
     tex->released = false;
@@ -2325,6 +2326,12 @@ bool gpu_wrote_into(Texture& tex) {
             newest = std::max(newest, it->second.second);
     if (!newest) return false;
     tex.gpu_wrote_seen = newest;
+    // (hookshot) a buffer write in a submission up to the one the GPU last drew it in: the drawing came after (the game's
+    // transient heaps reuse a render target's memory between passes), so the image is the content, not guest memory.
+    // Taken for newer, it was uploaded over: OoT's half-resolution scene targets (1536x864, 384x216) went back to stale
+    // memory a frame at a time, and the forest's fog came and went. RX_VK_GPU_DIRTY_OVER_DRAWN=1: uploaded, as before
+    static const bool over_drawn = getenv("RX_VK_GPU_DIRTY_OVER_DRAWN") != nullptr;
+    if (!over_drawn && tex.gpu_written && newest <= tex.drawn_value) return false;
     static int logged;
     if (logged++ < 40)
         logf("vk: texture #%u %#llx %ux%u NVN %#x: the GPU wrote its storage (submission %llu): uploaded again", tex.id,
