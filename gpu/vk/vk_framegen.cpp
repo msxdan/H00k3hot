@@ -259,7 +259,6 @@ bool ensure_size(VkCommandBuffer cmd, uint32_t w, uint32_t h) {
             return fg.work.empty() && !fg.worker_busy && fg.jobs.empty() && !fg.sets[0].busy && !fg.sets[1].busy && !fg.sets[2].busy;
         });
     }
-    queue_flush();
     {
         std::lock_guard qk(dev.present_mu);   // (every queue idle: the present queue's too, device_wait_idle_locked)
         device_wait_idle_locked();

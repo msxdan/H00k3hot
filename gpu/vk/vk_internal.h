@@ -54,7 +54,6 @@ struct Device {
     VkDevice device = VK_NULL_HANDLE;
     uint32_t queue_family = 0;
     VkQueue queue = VK_NULL_HANDLE;
-    VkQueue present_queue = VK_NULL_HANDLE;   // (DLSS 5 or RX_VK_ASYNC_PRESENT=1: presents apart from the submits; null: on queue)
     bool dlss5_layer = false;                 // (the menu's DLSS 5 is on and its Vulkan layer is installed: vk_main.cpp)
     PFN_vkDlssnrProcessImageHOOKSHOT dlss5_process = nullptr;   // (the layer's model on an image of ours: vk_framegen.cpp; null: at the present, as before)
     // extensions in use
@@ -86,9 +85,9 @@ struct Device {
     std::vector<VkImage> swap_images;
     std::vector<VkSemaphore> swap_rendered;   // present waits belong to acquired images, not frame slots
     std::mutex present_mu;   // (the swapchain: presents and resizes)
-    std::mutex present_queue_mu;   // (present_queue, in use: vkDeviceWaitIdle takes every queue)
     std::atomic<uint64_t> swap_resize{0};   // (a new window size, width << 32 | height: the next present makes the swapchain)
     // (hookshot) a queue of a compute family for vkQueuePresentKHR alone (vk_main.cpp create_device; RX_VK_PRESENT_QUEUE=0 / 1).
+    // With DLSS 5 (or RX_VK_ASYNC_PRESENT=1) it is a second queue of the graphics family instead, which the model also runs on.
     // VK_NULL_HANDLE: presents go on `queue` under present_mu. Its own lock: taken after present_mu, never before it
     VkQueue present_queue = VK_NULL_HANDLE;
     std::mutex present_queue_mu;

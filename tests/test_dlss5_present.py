@@ -36,7 +36,8 @@ def main():
         raise SystemExit("present_image presents on the present queue before it lets the submits' lock go")
     if present.index("qk.lock();") < present.index("vkQueuePresentKHR(dev.present_queue"):
         raise SystemExit("present_image takes the submits' lock back before the present is done")
-    if "vkDeviceWaitIdle(dev.device);" in replay.replace("std::lock_guard pq(dev.present_queue_mu); vkDeviceWaitIdle(dev.device);", ""):
+    held = replay.replace("std::lock_guard pq(dev.present_queue_mu); vkDeviceWaitIdle(dev.device);", "")
+    if "vkDeviceWaitIdle(dev.device);" in held.replace("std::lock_guard pq(dev.present_queue_mu);\n    vkDeviceWaitIdle(dev.device);", ""):
         raise SystemExit("vk_replay.cpp: a vkDeviceWaitIdle that does not hold the present queue")
 
     framegen = (VK / "vk_framegen.cpp").read_text(encoding="utf-8")
@@ -76,7 +77,7 @@ def main():
     size = framegen[framegen.index("bool ensure_size("):]
     size = size[:size.index("\n}\n")]
     need(size, "fg.work.empty() && !fg.worker_busy", "the worker is drained before the images go")
-    if size.index("!fg.worker_busy") > size.index("vkDeviceWaitIdle"):
+    if size.index("!fg.worker_busy") > size.index("device_wait_idle_locked"):
         raise SystemExit("ensure_size waits for the device before the worker has stopped using it")
     queue = framegen[framegen.index("void framegen_queue("):]
     queue = queue[:queue.index("\n}\n")]
