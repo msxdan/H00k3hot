@@ -43,6 +43,8 @@ bool preset_caps_memory();
 void menu_init();             // (the options from the file, once)
 void menu_set_gpu_count(int count);
 void menu_set_dlss5_layer(bool found);   // (vk_main.cpp: whether the DLSS 5 row's Vulkan layer is installed)
+bool menu_dlss5_demo();       // (RX_VK_DLSS5_DEMO: DLSS 5 on and off by turns, to record it)
+bool menu_dlss5_wanted();     // (vk_framegen.cpp, each frame: the row, or the demo's turn)
 void menu_set_dlss5_live();   // (vk_framegen.cpp: its worker runs the model, so the DLSS 5 row needs no restart)
 void menu_tick();             // (each frame shown: the keys, while the game's window has the focus)
 bool menu_is_open();

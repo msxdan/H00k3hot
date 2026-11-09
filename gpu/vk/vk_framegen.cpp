@@ -454,7 +454,7 @@ void worker_main() {
         vkWaitSemaphores(dev.device, &wi, UINT64_MAX);
         const DlssnrProcessImageInfoHOOKSHOT info{s.frame.image, VK_FORMAT_R8G8B8A8_UNORM, fg.w, fg.h, VK_IMAGE_LAYOUT_GENERAL, fg.ring_tl, s.wait};
         // (the menu's row, read each frame: off, the frame goes on raw, as when the layer refuses one)
-        const bool wanted = opts.dlss5 != 0;
+        const bool wanted = menu_dlss5_wanted();
         if (wanted != was_wanted) was_wanted = wanted, logf("vk: DLSS 5 %s from the menu", wanted ? "on" : "off");
         const VkResult res = wanted ? dev.dlss5_process(dev.device, dev.present_queue, &info) : VK_NOT_READY;
         const bool raw = res != VK_SUCCESS;

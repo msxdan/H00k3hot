@@ -110,11 +110,12 @@ bool create_instance() {
     // (the Insert menu's DLSS 5: DLSS5VKLayer, a Vulkan layer the player installs apart from Hookshot, which runs NVIDIA's model on
     // each presented frame. It turns on by this variable, read when the instance is made)
     menu_init();
-    if (opts.dlss5) setenv("VKLayer_DLSS5", "1", 1);
+    const bool dlss5 = opts.dlss5 || menu_dlss5_demo();
+    if (dlss5) setenv("VKLayer_DLSS5", "1", 1);
     // (NVIDIA Smooth Motion makes frames in the driver. After DLSS 5 in the layer order, the model runs only on the game's own frames)
     if (opts.smooth_motion) {
         setenv("NVPRESENT_ENABLE_SMOOTH_MOTION", "1", 1);
-        if (opts.dlss5) setenv("VK_INSTANCE_LAYERS", "VK_LAYER_NV_dlssnr:VK_LAYER_NV_present", 0);
+        if (dlss5) setenv("VK_INSTANCE_LAYERS", "VK_LAYER_NV_dlssnr:VK_LAYER_NV_present", 0);
     }
     {
         uint32_t n = 0;
@@ -124,8 +125,8 @@ bool create_instance() {
         bool found = false;
         for (const VkLayerProperties& l : layers) found |= !strcmp(l.layerName, "VK_LAYER_NV_dlssnr");
         menu_set_dlss5_layer(found);
-        dev.dlss5_layer = opts.dlss5 && found;
-        if (opts.dlss5) logf("vk: DLSS 5 is on in the menu; its layer (DLSS5VKLayer) is %s", found ? "installed" : "not installed: no effect");
+        dev.dlss5_layer = dlss5 && found;
+        if (dlss5) logf("vk: DLSS 5 is on in the menu; its layer (DLSS5VKLayer) is %s", found ? "installed" : "not installed: no effect");
     }
 #endif
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};

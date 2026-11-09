@@ -46,11 +46,11 @@ struct VkDependencyInfo {
     int sType; unsigned memoryBarrierCount = 0; const VkMemoryBarrier2* pMemoryBarriers = nullptr;
 };
 struct { bool show_fps = false; } opts;
-struct Bitmap { uint32_t w, h; } fps_bmp{120, 54}, menu_bmp{360, 500}, startup_bmp{600, 150};
-struct Upload {} ups[3][3];
+struct Bitmap { uint32_t w, h; } fps_bmp{120, 54}, menu_bmp{360, 500}, startup_bmp{600, 150}, demo_bmp{320, 64};
+struct Upload {} ups[4][3];
 std::mutex bmp_mu;
 std::atomic<bool> open_now{false}, startup_on{false};
-int cur_scale = 1, copies = 0, barriers = 0;
+int cur_scale = 1, copies = 0, barriers = 0, dlss5_demo_s = 0;
 bool transfer_pending = true;
 void vkCmdPipelineBarrier2(VkCommandBuffer cmd, const VkDependencyInfo* di) {
     CHECK(cmd == 1 && di->sType == VK_STRUCTURE_TYPE_DEPENDENCY_INFO);
@@ -72,15 +72,16 @@ void copy_over(VkCommandBuffer cmd, VkImage dst, Bitmap&, Upload&, int, int, uin
 }
 ''' + fn + r'''
 int main() {
-    for (bool startup : {false, true}) for (bool fps : {false, true}) for (bool menu : {false, true}) {
+    for (bool demo : {false, true}) for (bool startup : {false, true}) for (bool fps : {false, true}) for (bool menu : {false, true}) {
+        dlss5_demo_s = demo ? 5 : 0;
         opts.show_fps = fps;
         open_now = menu;
         startup_on = startup;
         copies = barriers = 0;
         transfer_pending = true; // the game image has just been blitted/cleared
         menu_record(1, 2, 0, 1280, 720);
-        CHECK(copies == int(startup) + int(fps && !startup) + int(menu));
-        if (!startup && !fps && !menu) CHECK(barriers == 0);
+        CHECK(copies == int(startup) + int(fps && !startup && !demo) + int(demo && !startup) + int(menu));
+        if (!demo && !startup && !fps && !menu) CHECK(barriers == 0);
     }
     std::puts("PASS: each overlay alone, together (the start-up screen's too) and none");
 }

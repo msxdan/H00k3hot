@@ -74,6 +74,7 @@ def main():
     if "fg.luma" in ring_use or "fg.flow" in ring_use or "fg.synth" in ring_use:
         raise SystemExit("the replay thread records the worker's passes")
     need(worker, "wanted ? dev.dlss5_process(", "the menu's row decides each frame, while the game runs")
+    need(framegen, "menu_dlss5_wanted()", "the row, or the demo's turn, decides each frame")
     need(worker, "menu_set_dlss5_live();", "the row stops asking for a restart once the worker calls the model")
     size = framegen[framegen.index("bool ensure_size("):]
     size = size[:size.index("\n}\n")]

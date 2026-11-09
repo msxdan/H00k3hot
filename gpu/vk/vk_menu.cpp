@@ -111,6 +111,9 @@ const char* tx_text_speed(int v) {
 const char* tx_handheld(int v) { return v ? "On (restart)" : "Off (restart)"; }
 const char* tx_restart_onoff(int v) { return v ? "On (restart)" : "Off (restart)"; }
 bool dlss5_layer_found = false;
+// (RX_VK_DLSS5_DEMO=<seconds>: to record it, DLSS 5 on and off by turns and the picture says which. The row and the saved options stay)
+int dlss5_demo_s = 0;
+std::atomic<int> dlss5_demo_state{-1};   // (what the worker last did: -1 nothing yet, 0 off, 1 on)
 std::atomic<bool> dlss5_live{false};   // (the frame generation worker calls the model, so the row applies at once)
 const char* tx_dlss5(int v) {
     if (!v) return dlss5_live ? "Off" : "Off (restart)";
@@ -589,7 +592,7 @@ struct Bitmap {
     bool keyed = false;                   // (black is see-through: copied as the runs of pixels in between)
     std::vector<VkBufferImageCopy> runs;
 };
-Bitmap menu_bmp, fps_bmp;
+Bitmap menu_bmp, fps_bmp, demo_bmp;
 std::mutex bmp_mu;
 int scale_of(uint32_t h) { return std::max(1u, h / 720); }
 
@@ -611,7 +614,7 @@ void gdi_draw(Bitmap& out, uint32_t w, uint32_t h, void (*paint)(HDC, uint32_t, 
     paint(dc, w, h, scale);
     paint_bits = nullptr;
     GdiFlush();
-    if (const char* dir = &out == &menu_bmp ? getenv("RX_VK_MENU_DUMP") : nullptr) {   // (test runs: each drawing of the menu, as menu_<n>.bmp)
+    if (const char* dir = &out == &menu_bmp || &out == &demo_bmp ? getenv("RX_VK_MENU_DUMP") : nullptr) {   // (test runs: each drawing of the menu, as menu_<n>.bmp)
         static int n = 0;
         char path[1024];
         snprintf(path, sizeof path, "%s/menu_%03d.bmp", dir, n++);
@@ -993,6 +996,17 @@ HFONT hard_font(int px, int weight) {
     return CreateFontA(-px, 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY,
                        DEFAULT_PITCH, "Segoe UI");
 }
+void paint_demo(HDC dc, uint32_t w, uint32_t h, int s) {   // (RX_VK_DLSS5_DEMO's label)
+    fill(dc, 0, 0, (int)w, (int)h, RGB(0, 0, 0));
+    SetBkMode(dc, TRANSPARENT);
+    SetTextAlign(dc, TA_LEFT | TA_TOP);
+    const bool on = dlss5_demo_state.load(std::memory_order_relaxed) == 1;
+    HFONT big = hard_font(40 * s, FW_BOLD);
+    HGDIOBJ old = SelectObject(dc, big);
+    outlined(dc, 4 * s, 4 * s, on ? "DLSS 5 ON" : "DLSS 5 OFF", on ? RGB(72, 255, 110) : RGB(255, 96, 84), 2 * s);
+    SelectObject(dc, old);
+    DeleteObject(big);
+}
 void paint_fps(HDC dc, uint32_t w, uint32_t h, int s) {
     fill(dc, 0, 0, (int)w, (int)h, RGB(0, 0, 0));
     SetBkMode(dc, TRANSPARENT);
@@ -1053,7 +1067,7 @@ struct Upload {
     void* map = nullptr;
     uint64_t size = 0, version = 0;
 };
-Upload ups[3][3];   // (the menu's, the counter's, the start-up screen's; a frame in flight's each)
+Upload ups[4][3];   // (the menu's, the counter's, the start-up screen's, the demo label's; a frame in flight's each)
 
 void copy_over(VkCommandBuffer cmd, VkImage dst, Bitmap& b, Upload& u, int x, int y, uint32_t w, uint32_t h) {
     std::lock_guard lk(bmp_mu);
@@ -1112,6 +1126,7 @@ void menu_init() {
     done = true;
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
     bool has_options = false;
+    if (const char* e = getenv("RX_VK_DLSS5_DEMO")) dlss5_demo_s = std::max(atoi(e), 0);
     const char* cheats = getenv("HOS_OOT_CHEATS");
     cheats_enabled = cheats && !strcmp(cheats, "1");
     if (cheats_enabled) {
@@ -1168,6 +1183,14 @@ int resolution_scale() {
 
 void menu_set_dlss5_layer(bool found) { dlss5_layer_found = found; }
 void menu_set_dlss5_live() { dlss5_live = true; }
+bool menu_dlss5_demo() { return dlss5_demo_s > 0; }
+bool menu_dlss5_wanted() {
+    if (!dlss5_demo_s) return opts.dlss5 != 0;
+    static const int64_t start = prof_now();
+    const bool on = (prof_now() - start) / (dlss5_demo_s * 1000000000LL) % 2 == 0;
+    dlss5_demo_state.store(on, std::memory_order_relaxed);
+    return on;
+}
 
 void menu_set_gpu_count(int count) {
     for (Row& r : rows) {
@@ -1674,6 +1697,15 @@ void menu_tick() {
             PostMessageA(app_window(), WM_APP + 8, (WPARAM)now_open, 0);
         }
     }
+    if (dlss5_demo_s) {   // (redrawn when the worker changes: the label follows what it really did)
+        static int drawn = -1, drawn_scale = 0;
+        const int state = dlss5_demo_state.load(std::memory_order_relaxed);
+        if (state >= 0 && (state != drawn || scale != drawn_scale)) {
+            drawn = state, drawn_scale = scale;
+            demo_bmp.keyed = true;
+            gdi_draw(demo_bmp, 320u * scale, 64u * scale, paint_demo, scale);
+        }
+    }
     if (opts.show_fps) {
         static int64_t next = 0, last_game = 0, last_shown = 0;
         const int64_t now = prof_now();
@@ -1701,7 +1733,7 @@ void menu_record(VkCommandBuffer cmd, VkImage dst, int slot, uint32_t w, uint32_
         lk.unlock();
         if (sw) copy_over(cmd, dst, startup_bmp, ups[2][slot], (int)(w - sw) / 2, (int)(h - sh) / 2, w, h);
     }
-    if (opts.show_fps && !startup_on.load(std::memory_order_relaxed)) {   // (no game frames yet: not "0 FPS" over the start-up screen)
+    if (opts.show_fps && !dlss5_demo_s && !startup_on.load(std::memory_order_relaxed)) {   // (no game frames yet: not "0 FPS" over the start-up screen)
         // The game image was just blitted (or cleared) into dst. Its write must
         // finish before the FPS pixels overwrite it; command order alone does
         // not order these transfer writes. The menu below has its own barrier.
@@ -1715,6 +1747,18 @@ void menu_record(VkCommandBuffer cmd, VkImage dst, int slot, uint32_t w, uint32_
         const uint32_t fw = fps_bmp.w;
         lk.unlock();
         if (fw) copy_over(cmd, dst, fps_bmp, ups[1][slot], (int)w - (int)fw - (int)(12 * cur_scale), (int)(10 * cur_scale), w, h);
+    }
+    if (dlss5_demo_s && !startup_on.load(std::memory_order_relaxed)) {   // (the left edge, half way down)
+        VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+        mb.srcStageMask = mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+        mb.srcAccessMask = mb.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.memoryBarrierCount = 1, di.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &di);
+        std::unique_lock lk(bmp_mu);
+        const uint32_t dw = demo_bmp.w, dh = demo_bmp.h;
+        lk.unlock();
+        if (dw) copy_over(cmd, dst, demo_bmp, ups[3][slot], (int)(24 * cur_scale), (int)(h - dh) / 2, w, h);
     }
     if (open_now.load(std::memory_order_relaxed)) {
         std::unique_lock lk(bmp_mu);

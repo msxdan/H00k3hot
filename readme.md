@@ -256,6 +256,8 @@ player sets it up once:
 4. In the game, set **DLSS 5** to On in the Graphics tab and restart it. From then on, with Frame generation in use, the row
    turns it off and on at once; a game started with the row Off needs a restart to turn it on.
 
+`RX_VK_DLSS5_DEMO=<seconds>` turns it on and off by turns and says which on the picture, to record it, with no menu.
+
 It costs frame rate. For more frames set **Smooth Motion** to On (NVIDIA's driver frame generation, RTX 40 and newer) and leave
 Frame generation Off: Smooth Motion comes after DLSS 5, so the model runs only on the game's own frames, while Frame generation
 multiplies its work. While it is on, presents get a queue and a
