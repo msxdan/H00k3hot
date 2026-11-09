@@ -50,6 +50,7 @@ def main():
     need(internal, "PFN_vkDlssnrProcessImageHOOKSHOT dlss5_process", "null keeps the model at the present")
 
     need(framegen, "RingSlot ring[kRingSlots]", "the worker path's frames")
+    need(framegen, "kRingSlots = 3", "one frame waits for the model: each more is a game frame of input lag")
     need(framegen, "VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);\n        if (!fg.ring_tl)", "the model writes its answer back into the slot")
     worker = framegen[framegen.index("void worker_main()"):]
     worker = worker[:worker.index("\n} // namespace")]

@@ -66,7 +66,7 @@ struct RingSlot {
     bool gap = false;   // (a loading hitch came before it: nothing to blend)
     uint64_t wait = 0;   // (the copy into it is done at this value of the ring timeline)
 };
-constexpr int kRingSlots = 4;   // (one kept as the worker's previous frame, one being processed, two waiting)
+constexpr int kRingSlots = 3;   // (one kept as the worker's previous frame, one being processed, one waiting: each more is a game frame of input lag)
 
 struct Pipe {
     VkDescriptorSetLayout set = VK_NULL_HANDLE;
