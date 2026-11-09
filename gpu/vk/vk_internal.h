@@ -34,6 +34,17 @@ void queue_flush();          // (the same, taking dev.present_mu)
 // every queue is synchronized by the host around it
 void device_wait_idle_locked();
 
+// (DLSS5VKLayer's own call: the model on an image of ours, in place, the caller's thread blocked for it. The layer has the same struct)
+struct DlssnrProcessImageInfoHOOKSHOT {
+    VkImage image;
+    VkFormat format;
+    uint32_t width, height;
+    VkImageLayout layout;       // (GENERAL)
+    VkSemaphore wait_semaphore; // (a timeline, null: none)
+    uint64_t wait_value;
+};
+typedef VkResult(VKAPI_PTR* PFN_vkDlssnrProcessImageHOOKSHOT)(VkDevice, VkQueue, const DlssnrProcessImageInfoHOOKSHOT*);
+
 struct Device {
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
@@ -45,6 +56,7 @@ struct Device {
     VkQueue queue = VK_NULL_HANDLE;
     VkQueue present_queue = VK_NULL_HANDLE;   // (DLSS 5 or RX_VK_ASYNC_PRESENT=1: presents apart from the submits; null: on queue)
     bool dlss5_layer = false;                 // (the menu's DLSS 5 is on and its Vulkan layer is installed: vk_main.cpp)
+    PFN_vkDlssnrProcessImageHOOKSHOT dlss5_process = nullptr;   // (the layer's model on an image of ours: vk_framegen.cpp; null: at the present, as before)
     // extensions in use
     bool mesh_shader = false, external_memory_host = false, external_memory_fd = false, dma_buf_import = false, pipeline_library = false,
          graphics_pipeline_library = false, custom_border_color = false, dynamic_state3 = false,

@@ -441,6 +441,19 @@ bool create_device() {
     dev.present_family = dev.queue_family;
     if (compute_family != UINT32_MAX) vkGetDeviceQueue(dev.device, compute_family, 0, &dev.present_queue), dev.present_family = compute_family;
     if (separate_present) vkGetDeviceQueue(dev.device, dev.queue_family, 1, &dev.present_queue);
+    {   // (DLSS 5 before the frames are made, vk_framegen.cpp. Resolved by name: the loader, MangoHud and the rest pass a name
+        // they do not know on down the chain to the layer. A layer above it that does not leaves this null, and the model runs
+        // at the present, as without it. RX_VK_DLSS5_BEFORE_FG=0: to compare)
+        const char* e = getenv("RX_VK_DLSS5_BEFORE_FG");
+        if (!e || atoi(e) != 0)
+            dev.dlss5_process = (PFN_vkDlssnrProcessImageHOOKSHOT)vkGetDeviceProcAddr(dev.device, "vkDlssnrProcessImageHOOKSHOT");
+        if (dev.dlss5_process)
+            logf("vk: DLSS 5 before frame generation: vkDlssnrProcessImageHOOKSHOT found%s",
+                 dev.present_queue ? "" : ", but there is no present queue (DLSS 5 row or RX_VK_ASYNC_PRESENT=1): not used");
+        else if (dev.dlss5_layer)
+            logf("vk: DLSS 5 before frame generation: vkDlssnrProcessImageHOOKSHOT not found (%s): the model runs at the present",
+                 e && atoi(e) == 0 ? "RX_VK_DLSS5_BEFORE_FG=0" : "an older layer, or a layer above it that does not pass the name on");
+    }
     if (dev.buffer_marker) buffer_markers_init();
     coopmat_init();
     if (dev.push_descriptor) {

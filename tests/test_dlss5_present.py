@@ -42,6 +42,46 @@ def main():
     framegen = (VK / "vk_framegen.cpp").read_text(encoding="utf-8")
     need(framegen, "|| dev.present_queue)", "with a present queue the display thread shows the frames")
 
+    need(vk_main, '"vkDlssnrProcessImageHOOKSHOT"', "the layer's entry point is found by name")
+    need(vk_main, '"RX_VK_DLSS5_BEFORE_FG"', "the switch to compare")
+    need(vk_main, "not found", "the case with no entry point is said in the log")
+    internal = (VK / "vk_internal.h").read_text(encoding="utf-8")
+    need(internal, "PFN_vkDlssnrProcessImageHOOKSHOT dlss5_process", "null keeps the model at the present")
+
+    need(framegen, "RingSlot ring[kRingSlots]", "the worker path's frames")
+    need(framegen, "VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);\n        if (!fg.ring_tl)", "the model writes its answer back into the slot")
+    worker = framegen[framegen.index("void worker_main()"):]
+    worker = worker[:worker.index("\n} // namespace")]
+    need(worker, "dev.dlss5_process(dev.device, dev.present_queue", "the model on the present queue, not the replay's")
+    need(worker, "fg.jobs.push_back({set, at, done.value, fg.out_tl})", "the job stamped once the worker has finished, and carrying the order across queues")
+    need(framegen, "j.set->frame[k].view, j.wait, j.value)", "the display thread's submit on the other queue waits for the worker's")
+    need(present, "wait ? 2 : 1", "present_image waits for what another queue wrote")
+    if worker.index("const int64_t at = now_ns();") < worker.index("vkWaitForFences(dev.device, 1, &fence"):
+        raise SystemExit("the display thread's stamp is taken before the worker's GPU work is done")
+    need(worker, "vkWaitSemaphores", "the worker waits for the copy before the model reads it")
+    if worker.index("vkWaitSemaphores") > worker.index("dev.dlss5_process("):
+        raise SystemExit("the model runs before the copy into the slot is known done")
+    need(worker, "raw == fg.prev_raw", "a raw frame is not blended with a processed one")
+    if "dev.dlss5_process(" in framegen[:framegen.index("void worker_main()")]:
+        raise SystemExit("the model's call off the worker thread: the replay thread must not wait for it")
+    record = framegen[framegen.index("bool framegen_record("):]
+    record = record[:record.index("\n}\n")]
+    need(record, "if (fg.worker) {", "the replay thread only copies on the worker path")
+    ring_use = record[record.index("if (fg.worker) {"):]
+    ring_use = ring_use[:ring_use.index("return true;")]
+    if "fg.luma" in ring_use or "fg.flow" in ring_use or "fg.synth" in ring_use:
+        raise SystemExit("the replay thread records the worker's passes")
+    size = framegen[framegen.index("bool ensure_size("):]
+    size = size[:size.index("\n}\n")]
+    need(size, "fg.work.empty() && !fg.worker_busy", "the worker is drained before the images go")
+    if size.index("!fg.worker_busy") > size.index("vkDeviceWaitIdle"):
+        raise SystemExit("ensure_size waits for the device before the worker has stopped using it")
+    queue = framegen[framegen.index("void framegen_queue("):]
+    queue = queue[:queue.index("\n}\n")]
+    need(queue, "queue_flush_locked();", "the copy's recording is out before the worker waits for it")
+    if queue.index("queue_flush_locked();") > queue.index("vkQueueSubmit2(dev.queue"):
+        raise SystemExit("framegen_queue signals the ring timeline ahead of the held copy it is to follow")
+
     menu = (VK / "vk_menu.cpp").read_text(encoding="utf-8")
     row = menu.index('"DLSS 5", &opts.dlss5')
     if menu.rfind("#ifndef _WIN32", 0, row) < menu.rfind("#endif", 0, row):
