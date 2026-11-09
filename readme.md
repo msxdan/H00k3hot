@@ -199,6 +199,7 @@ and the right one closes the menu. Your choices are saved in `hookshot_options.i
 | | Sharpness | 0 to 100%, in steps of 10 | 0% |
 | | Handheld profile | Off, On (after a restart) | Off |
 | | Ultrawide | 16:9, Monitor's shape (after a restart) | 16:9 |
+| | Smooth Motion (Linux) | Off, On (after a restart) | Off |
 | | DLSS 5 (Linux) | Off, On (after a restart) | Off |
 | | Robust buffers | Auto, Off, On (after a restart) | Auto |
 | Gameplay | FPS counter | Off, On | Off |
@@ -254,7 +255,9 @@ player sets it up once:
 3. Run `dlssnr-helper start` before the game (`dlssnr-helper stop` afterwards).
 4. In the game, set **DLSS 5** to On in the Graphics tab and restart it.
 
-It costs frame rate, and Frame generation multiplies its work, so leave that Off. While it is on, presents get a queue and a
+It costs frame rate. For more frames set **Smooth Motion** to On (NVIDIA's driver frame generation, RTX 40 and newer) and leave
+Frame generation Off: Smooth Motion comes after DLSS 5, so the model runs only on the game's own frames, while Frame generation
+multiplies its work. While it is on, presents get a queue and a
 thread of their own, so the layer's work does not hold the game back (`RX_VK_ASYNC_PRESENT=0` to compare).
 
 ### Controls

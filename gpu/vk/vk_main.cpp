@@ -111,6 +111,11 @@ bool create_instance() {
     // each presented frame. It turns on by this variable, read when the instance is made)
     menu_init();
     if (opts.dlss5) setenv("VKLayer_DLSS5", "1", 1);
+    // (NVIDIA Smooth Motion makes frames in the driver. After DLSS 5 in the layer order, the model runs only on the game's own frames)
+    if (opts.smooth_motion) {
+        setenv("NVPRESENT_ENABLE_SMOOTH_MOTION", "1", 1);
+        if (opts.dlss5) setenv("VK_INSTANCE_LAYERS", "VK_LAYER_NV_dlssnr:VK_LAYER_NV_present", 0);
+    }
     {
         uint32_t n = 0;
         vkEnumerateInstanceLayerProperties(&n, nullptr);

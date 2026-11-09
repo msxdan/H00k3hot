@@ -7,6 +7,7 @@ namespace mkwvk {
 
 // (out of the box every feature is off: what the game does on its own. The ini beside the executable keeps a player's choices)
 struct Options {
+    int smooth_motion = 0;   // (linux) NVIDIA Smooth Motion, the driver's frame generation; read once, at the start (vk_main.cpp)
     int dlss5 = 0;        // (linux) DLSS 5, through the DLSS5VKLayer Vulkan layer the player installs (vk_main.cpp)
     int framegen = 0;     // made frames: 0 off, or 2, 3, 4 times the game's frames
     int pace = 0;         // frames shown on an even line (vk_framegen.cpp)

@@ -109,6 +109,7 @@ const char* tx_text_speed(int v) {
     return t[v];
 }
 const char* tx_handheld(int v) { return v ? "On (restart)" : "Off (restart)"; }
+const char* tx_restart_onoff(int v) { return v ? "On (restart)" : "Off (restart)"; }
 bool dlss5_layer_found = false;
 const char* tx_dlss5(int v) { return !v ? "Off (restart)" : dlss5_layer_found ? "On (restart)" : "On (not installed)"; }
 const char* tx_ultrawide(int v) { return v ? "Monitor's shape (restart)" : "16:9 (restart)"; }
@@ -199,6 +200,9 @@ Row rows[] = {
     {TAB_GRAPHICS, "Ultrawide", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
      "Monitor's shape widens the camera to fill a screen wider than 16:9. The HUD is still stretched. Applies after a restart."},
 #ifndef _WIN32
+    {TAB_GRAPHICS, "Smooth Motion", &opts.smooth_motion, 0, 1, 1, tx_restart_onoff,
+     "NVIDIA's frame generation in the driver, for RTX 40 cards and newer. With DLSS 5 the model then works only on the game's own "
+     "frames: use this and not Frame generation. Applies after a restart."},
     {TAB_GRAPHICS, "DLSS 5", &opts.dlss5, 0, 1, 1, tx_dlss5,
      "NVIDIA's neural rendering, for RTX 50 cards: richer light and materials, at a cost in frame rate. Needs DLSS5VKLayer, installed "
      "apart from Hookshot, with its helper running. Frame generation multiplies its work. Applies after a restart."},
@@ -467,7 +471,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         *r.value = v > r.hi ? r.lo : v < r.lo ? r.hi : v;
         if (r.value != &opts.fullscreen && r.value != &opts.show_fps && r.value != &opts.gpu_device &&
             r.value != &opts.invert_cam_x && r.value != &opts.invert_cam_y && r.value != &opts.mouse_native &&
-            r.value != &opts.mouse_sens && r.value != &opts.mouse_invert && r.value != &opts.dlss5) {   // (the controls are not the preset's)
+            r.value != &opts.mouse_sens && r.value != &opts.mouse_invert && r.value != &opts.dlss5 && r.value != &opts.smooth_motion) {   // (the controls are not the preset's)
             opts.preset = 0; // Custom
             sync_preset_budgets(0);
         }

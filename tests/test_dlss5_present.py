@@ -22,6 +22,8 @@ def main():
         raise SystemExit("the DLSS 5 layer's variable is set after the instance that reads it is made")
     if instance.index("menu_init()") > instance.index('setenv("VKLayer_DLSS5"'):
         raise SystemExit("the DLSS 5 row is used before the saved options are read")
+    need(instance, 'setenv("NVPRESENT_ENABLE_SMOOTH_MOTION", "1", 1)', "Smooth Motion turns on by this variable")
+    need(instance, '"VK_LAYER_NV_dlssnr:VK_LAYER_NV_present"', "Smooth Motion after DLSS 5, so the model sees only the game's frames")
     need(vk_main, "q.queueCount = separate_present ? 2 : 1", "one queue unless the presents are apart")
     need(vk_main, '"RX_VK_ASYNC_PRESENT"', "the switch to compare")
     need(vk_main, "dev.dlss5_layer", "only with the layer really there")
