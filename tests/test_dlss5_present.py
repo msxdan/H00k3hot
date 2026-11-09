@@ -47,6 +47,7 @@ def main():
     if menu.rfind("#ifndef _WIN32", 0, row) < menu.rfind("#endif", 0, row):
         raise SystemExit("the DLSS 5 row is not Linux only: the layer has no Windows build")
     need(menu, "r.value != &opts.dlss5", "the row does not reset the quality preset to Custom")
+    need(menu, "r.value != &opts.smooth_motion", "nor does the Smooth Motion row")
 
     # (nothing of NVIDIA's or of the layer's in the repository: the player installs them)
     found = [p.name for p in ROOT.rglob("*") if p.is_file() and ".git" not in p.parts and
