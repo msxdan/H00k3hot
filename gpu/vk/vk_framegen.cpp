@@ -429,8 +429,9 @@ void worker_main() {
     VkFence fence = VK_NULL_HANDLE;
     vkCreateFence(dev.device, &fi, nullptr, &fence);
     logf("vk: DLSS 5 before frame generation: running (the model on the game's frames, frames made after it)");
+    menu_set_dlss5_live();
     int refused = 0;
-    bool said_ok = false;
+    bool said_ok = false, was_wanted = true;
     for (;;) {
         int i;
         OutSet* set;
@@ -453,9 +454,12 @@ void worker_main() {
         wi.pValues = &s.wait;
         vkWaitSemaphores(dev.device, &wi, UINT64_MAX);
         const DlssnrProcessImageInfoHOOKSHOT info{s.frame.image, VK_FORMAT_R8G8B8A8_UNORM, fg.w, fg.h, VK_IMAGE_LAYOUT_GENERAL, fg.ring_tl, s.wait};
-        const VkResult res = dev.dlss5_process(dev.device, dev.present_queue, &info);
+        // (the menu's row, read each frame: off, the frame goes on raw, as when the layer refuses one)
+        const bool wanted = opts.dlss5 != 0;
+        if (wanted != was_wanted) was_wanted = wanted, logf("vk: DLSS 5 %s from the menu", wanted ? "on" : "off");
+        const VkResult res = wanted ? dev.dlss5_process(dev.device, dev.present_queue, &info) : VK_NOT_READY;
         const bool raw = res != VK_SUCCESS;
-        if (raw && refused++ < 8) logf("vk: DLSS 5 before frame generation: the layer gave %d for a frame: it goes on raw", (int)res);
+        if (raw && wanted && refused++ < 8) logf("vk: DLSS 5 before frame generation: the layer gave %d for a frame: it goes on raw", (int)res);
         if (!raw && !said_ok) said_ok = true, logf("vk: DLSS 5 before frame generation: first frame processed (%ux%u)", fg.w, fg.h);
 
         const int m = fg.mult, cur = fg.cur, prev = cur ^ 1;   // (fg.mult: what the sets were made for, the menu may have moved)

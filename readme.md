@@ -200,7 +200,7 @@ and the right one closes the menu. Your choices are saved in `hookshot_options.i
 | | Handheld profile | Off, On (after a restart) | Off |
 | | Ultrawide | 16:9, Monitor's shape (after a restart) | 16:9 |
 | | Smooth Motion (Linux) | Off, On (after a restart) | Off |
-| | DLSS 5 (Linux) | Off, On (after a restart) | Off |
+| | DLSS 5 (Linux) | Off, On (at once with Frame generation in use, if it was on at the start; else after a restart) | Off |
 | | Robust buffers | Auto, Off, On (after a restart) | Auto |
 | Gameplay | FPS counter | Off, On | Off |
 | | Game speed | Per frame, Real time | Real time |
@@ -253,7 +253,8 @@ player sets it up once:
 2. Give it NVIDIA's model: `nvngx_dlssnr.dll`, from a game you own that has DLSS 5. Find that file in the game's folder and
    run `dlssnr-helper import-binaries <the folder that holds it>`. `dlssnr-helper doctor` says what is still missing.
 3. Run `dlssnr-helper start` before the game (`dlssnr-helper stop` afterwards).
-4. In the game, set **DLSS 5** to On in the Graphics tab and restart it.
+4. In the game, set **DLSS 5** to On in the Graphics tab and restart it. From then on, with Frame generation in use, the row
+   turns it off and on at once; a game started with the row Off needs a restart to turn it on.
 
 It costs frame rate. For more frames set **Smooth Motion** to On (NVIDIA's driver frame generation, RTX 40 and newer) and leave
 Frame generation Off: Smooth Motion comes after DLSS 5, so the model runs only on the game's own frames, while Frame generation

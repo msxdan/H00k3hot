@@ -43,6 +43,7 @@ bool preset_caps_memory();
 void menu_init();             // (the options from the file, once)
 void menu_set_gpu_count(int count);
 void menu_set_dlss5_layer(bool found);   // (vk_main.cpp: whether the DLSS 5 row's Vulkan layer is installed)
+void menu_set_dlss5_live();   // (vk_framegen.cpp: its worker runs the model, so the DLSS 5 row needs no restart)
 void menu_tick();             // (each frame shown: the keys, while the game's window has the focus)
 bool menu_is_open();
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)

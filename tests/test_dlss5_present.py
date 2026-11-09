@@ -71,6 +71,8 @@ def main():
     ring_use = ring_use[:ring_use.index("return true;")]
     if "fg.luma" in ring_use or "fg.flow" in ring_use or "fg.synth" in ring_use:
         raise SystemExit("the replay thread records the worker's passes")
+    need(worker, "wanted ? dev.dlss5_process(", "the menu's row decides each frame, while the game runs")
+    need(worker, "menu_set_dlss5_live();", "the row stops asking for a restart once the worker calls the model")
     size = framegen[framegen.index("bool ensure_size("):]
     size = size[:size.index("\n}\n")]
     need(size, "fg.work.empty() && !fg.worker_busy", "the worker is drained before the images go")
@@ -88,6 +90,7 @@ def main():
         raise SystemExit("the DLSS 5 row is not Linux only: the layer has no Windows build")
     need(menu, "r.value != &opts.dlss5", "the row does not reset the quality preset to Custom")
     need(menu, "r.value != &opts.smooth_motion", "nor does the Smooth Motion row")
+    need(menu, '"On (restart)"', "without the worker the row still needs a restart")
 
     # (nothing of NVIDIA's or of the layer's in the repository: the player installs them)
     found = [p.name for p in ROOT.rglob("*") if p.is_file() and ".git" not in p.parts and

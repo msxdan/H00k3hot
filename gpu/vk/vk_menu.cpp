@@ -111,7 +111,11 @@ const char* tx_text_speed(int v) {
 const char* tx_handheld(int v) { return v ? "On (restart)" : "Off (restart)"; }
 const char* tx_restart_onoff(int v) { return v ? "On (restart)" : "Off (restart)"; }
 bool dlss5_layer_found = false;
-const char* tx_dlss5(int v) { return !v ? "Off (restart)" : dlss5_layer_found ? "On (restart)" : "On (not installed)"; }
+std::atomic<bool> dlss5_live{false};   // (the frame generation worker calls the model, so the row applies at once)
+const char* tx_dlss5(int v) {
+    if (!v) return dlss5_live ? "Off" : "Off (restart)";
+    return !dlss5_layer_found ? "On (not installed)" : dlss5_live ? "On" : "On (restart)";
+}
 const char* tx_ultrawide(int v) { return v ? "Monitor's shape (restart)" : "16:9 (restart)"; }
 int gpu_device_at_start = 0;   // (the row's value the game started with: menu_set_gpu_count)
 const char* tx_gpu(int v) {
@@ -205,7 +209,8 @@ Row rows[] = {
      "frames: use this and not Frame generation. Applies after a restart."},
     {TAB_GRAPHICS, "DLSS 5", &opts.dlss5, 0, 1, 1, tx_dlss5,
      "NVIDIA's neural rendering, for RTX 50 cards: richer light and materials, at a cost in frame rate. Needs DLSS5VKLayer, installed "
-     "apart from Hookshot, with its helper running. Frame generation multiplies its work. Applies after a restart."},
+     "apart from Hookshot, with its helper running. Frame generation multiplies its work. Applies at once if it was on at the start "
+     "and Frame generation is in use, else after a restart."},
 #endif
     {TAB_GRAPHICS, "Robust buffers", &opts.robust, 0, 2, 1, tx_robust,
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Auto is on, on every card; "
@@ -1162,6 +1167,7 @@ int resolution_scale() {
 }
 
 void menu_set_dlss5_layer(bool found) { dlss5_layer_found = found; }
+void menu_set_dlss5_live() { dlss5_live = true; }
 
 void menu_set_gpu_count(int count) {
     for (Row& r : rows) {
