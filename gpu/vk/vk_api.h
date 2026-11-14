@@ -28,6 +28,10 @@ enum { HOS_OPT_DLSS_JITTER_W = 24, HOS_OPT_DLSS_JITTER_H, HOS_OPT_DLSS_JITTER_PH
 /* (hookshot) the Audio tab's rows (host/nn_audio.c reads them every 100 ms): the volume in percent, and no sound while
    another window has the focus */
 enum { HOS_OPT_VOLUME = 27, HOS_OPT_MUTE_BACKGROUND };
+/* (hookshot) the Controls tab's Walk mode and Walk speed (host/nn_hid.c: the Walk control, HOS_KEY_WALK): 0 Link walks
+   while its key is held, 1 one press walks and the next runs again; how far the movement keys then tilt the left stick, in
+   percent of the way (15 to 90) */
+enum { HOS_OPT_WALK_MODE = 49, HOS_OPT_WALK_SPEED };
 /* (hookshot) the Insert menu's HDR set to Native (host/nn_vi.c QueryDisplayHdrStatus and QueryDisplayHdrPaperWhite): whether
    the game is told its display is HDR10 (the swapchain is one), and the peak and paper white it is told, in nits */
 /* (HOS_OPT_DISCORD, 43: the Insert menu's Discord status row, host/discord_rpc.c: 1 on; HOS_OPT_SKIP_TITLE, 44: its Skip
@@ -45,10 +49,10 @@ enum { HOS_OPT_PROMPTS = 46 };
    temporal upscalers, which take only that scene) */
 enum { HOS_OPT_HDR_TONEMAP = 47 };
 /* Gameplay's vertical field of view, percent of the game's current angle; 100 is unchanged. */
-/* 49 and 50 are reserved for Walk mode and Walk speed (#2345). */
+/* Walk mode and Walk speed use 49 and 50 (#2345). */
 enum { HOS_OPT_FOV = 51 };
 /* (HOS_OPT_SKIP_OPENING, 52: Gameplay's Skip opening, host/hos_main.c hos_oot_opening. Off. The new-game story movie
-   and Navi waking Link. 44 stays reserved for Skip title, 49 and 50 for Walk, 60 for the item wheel. A new option id
+   and Navi waking Link. 44 stays reserved for Skip title, 49 and 50 are Walk's, 60 is reserved for the item wheel. A new option id
    answered by the existing option callback does not change MkwVkHost or MkwVkRenderer.) */
 enum { HOS_OPT_SKIP_OPENING = 52 };
 /* (HOS_OPT_FPS_CAP, 53: the Game frame rate cap row, host/nn_vi.c fps_refresh reads it at each present: 0 the console's 60, then
@@ -85,12 +89,12 @@ enum { HOS_PROMPT_SWITCH, HOS_PROMPT_XBOX, HOS_PROMPT_PS4, HOS_PROMPT_PS5, HOS_P
    the textures (the ocarina's notes, the Talk ring's letters, the System page's controller), the layouts (the Talk ring's
    places, the ocarina hint's spacing), the icons in texts; the rest at the next start */
 enum { HOS_PROMPTS_LIVE_TEXTURES = 1, HOS_PROMPTS_LIVE_LAYOUTS = 2, HOS_PROMPTS_LIVE_TEXTS = 4, HOS_PROMPTS_LIVE_ALL = 7 };
-/* keys only (HOS_BIND_KEY), after the Switch's buttons: the left stick's and the camera's directions, and the
-   ocarina's five note controls (which take a gamepad input too, and share it: a note's key can be some other
-   control's key at once, host/nn_hid.c has_pad) */
+/* keys only (HOS_BIND_KEY), after the Switch's buttons: the left stick's and the camera's directions, and Walk (while its
+   key is held, the movement keys tilt the left stick less: host/nn_hid.c walk_held). The ocarina's five note controls
+   take a gamepad input too, and share it: a note's key can be some other control's key at once, host/nn_hid.c has_pad */
 enum { HOS_KEY_MOVE_UP = HOS_SW_N, HOS_KEY_MOVE_DOWN, HOS_KEY_MOVE_LEFT, HOS_KEY_MOVE_RIGHT, HOS_KEY_CAM_UP,
        HOS_KEY_CAM_DOWN, HOS_KEY_CAM_LEFT, HOS_KEY_CAM_RIGHT, HOS_KEY_OC_NOTE_L, HOS_KEY_OC_NOTE_R,
-       HOS_KEY_OC_NOTE_A, HOS_KEY_OC_NOTE_Y, HOS_KEY_OC_NOTE_X, HOS_KEY_N };
+       HOS_KEY_OC_NOTE_A, HOS_KEY_OC_NOTE_Y, HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_N };
 
 /* (hookshot) the mouse over the window while it is free (not captured): the Insert menu's (host/display.c,
    host/posix/display_sdl.c). x and y: the cursor in the window's pixels, of a window width x height pixels (the

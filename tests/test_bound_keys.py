@@ -39,6 +39,7 @@ def between(text, first, last):
 
 
 PRELUDE = r"""
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,6 +65,7 @@ static void ReleaseSRWLockShared(SRWLOCK *p) { (void)p; }
 #define VK_SHIFT 0x10
 #define VK_CONTROL 0x11
 #define VK_MENU 0x12
+#define VK_CAPITAL 0x14
 #define VK_SPACE 0x20
 #define VK_NUMPAD0 0x60
 #define VK_NUMPAD2 0x62

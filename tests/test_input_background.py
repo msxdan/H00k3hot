@@ -27,7 +27,7 @@ RUN_ALL_ARGS = ["--cc", "gcc"]
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ("foreground", "script-background", "headless", "noactivate", "live-background",
          "no-script-background", "exclusive-foreground", "exclusive-background", "pads-env", "pads-menu", "pads-off",
-         "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background")
+         "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle")
 
 
 def block(text, marker):
@@ -69,6 +69,7 @@ def main():
     constants += block(api, "enum { HOS_OPT_CHEAT_HEARTS") + ";\n"
     constants += block(api, "enum { HOS_OPT_HOLD_TOGGLE") + ";\n"
     constants += block(api, "enum { HOS_BIND_PAD") + ";\n"   # (the live input's !bind)
+    constants += block(api, "enum { HOS_OPT_WALK_MODE") + ";\n"   # (the Walk key's rows: read_input asks for them)
     for name in ("STATE_SIZE", "NPAD_NO1", "ATTR_CONNECTED"):
         matches = re.findall(r"^#define " + name + r"\s+[^\n]+", hid, re.M)
         assert len(matches) == 1, name
@@ -99,6 +100,9 @@ static void player_used(void) {}
         block(hid, "static int mouse_vk_slot("), re.search(r"^static int mouse_armed\[5\];", hid, re.M).group(0),
         block(hid, "static void mouse_buttons_arm("), block(hid, "static int bound_down("),
         block(hid, "static void oc_notes("), block(hid, "static uint64_t oc_pad_word("),
+        # (walking on the keyboard: the movement keys' tilt, read_input asks for it)
+        block(hid, "static int walk_held("), block(hid, "enum { WALK_SPEED_DEFAULT") + ";",
+        block(hid, "static int walk_percent("), block(hid, "static void move_keys_stick("),
         block(hid, "static int flight_jump_shortcut("), read, block(hid, "static void npad_states(")))
     glue = (ROOT / "host/mkw_glue.c").read_text(encoding="utf-8")
     actual += "\n" + "\n".join(block(glue, "uint64_t " + name + "(")
@@ -126,7 +130,7 @@ static void player_used(void) {}
              "-I" + str(folder), str(ROOT / "tests/input_background_test.c"), "-o", str(exe)])
         for case in ((a.case,) if a.case else CASES):
             case_env = dict(env)
-            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "hold-toggle", "hold-mouse", "hold-background"):
+            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle"):
                 case_env["HOS_INPUT_SCRIPT"] = "0:A+LUP/200"
             if case in ("frame-hold", "live-frame", "reuse-frame"):
                 case_env["HOS_INPUT_FRAME_CLOCK"] = "1"
