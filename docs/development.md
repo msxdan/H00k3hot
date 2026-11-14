@@ -185,6 +185,93 @@ See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-a
 | `HOS_HEAP_COMMIT=1` | Windows: the whole heap committed at `SetMemoryHeapSize`, as before. By default it is only reserved and committed 64 KB at a time as it is first touched (`commit_on_touch`, `host/mkw_glue.c`), and host calls that hand guest memory to the kernel (`nn_fs.c`'s reads and writes) commit their range first; a commit refused at Windows' commit limit then shows mid-play instead of at the heap's setup. For A/B |
 | `HOS_PAGES_LIMIT=1` | A diagnostic: `AllocateMemoryPages` is refused past the console's total (heap and mapped pages), as on the console. Keep it off: OoT retries a refused allocation forever |
 
+### Crash and unclean-end records
+
+The game keeps a local text record in `bug-reports/pending/crash-<UTC time>.txt`
+after an unhandled exception, Linux SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT, the
+Windows heap-corruption/fail-fast codes already reported by the host, `hos_fatal`,
+or a fatal renderer exit (device loss has its own reason). A same-second collision
+adds the process id and a counter; an older record is never overwritten.
+The existing `CRASH:` log lines remain unchanged. Nothing is uploaded or opened.
+Fatal-message collection runs in the shared host logger before its thread and level tags are
+added. Both ordinary and levelled host logging keep their existing formatting.
+Each start gets a random `run_id`, logged immediately after the version line, before
+the cache/log migration summary and record-pruning notes, and copied into its records.
+Match that id, not a rotated log's current filename, to find the right run.
+An unclean-end record keeps the previous marker's id.
+
+The text has the failed run's version, UTC time, uptime, exception/signal code,
+fault-address class (not the address), thread, module basenames and offsets,
+bounded host and guest backtraces, and the guest registers already printed in
+the log. It does not copy the memory near those registers, saves, full paths or
+environment values. Last-present age is `unknown` when the host has no timestamp.
+Offsets are relative to the module's load base, the same numbers as the existing
+`CRASH:` lines, not offsets in the file. Ordinary namespace-qualified thread
+names such as `sead::MainThread` are retained; addresses, paths and identities
+are still redacted.
+The Linux host trace is a checked frame-pointer chain, and may stop early in
+optimized code; the existing log still attempts its longer glibc backtrace.
+Linux core-dump settings are neither requested nor changed. The record's pid and
+time can locate a core the system kept itself; no core is copied into a report.
+Real hardware faults re-fault with their original signal information, so their
+system core dumps are unchanged. Only externally sent signals are re-raised.
+
+Each process owns an OS-locked `bug-reports/running/<pid>.running` marker.
+At the next start, an unlocked marker without a completed crash record produces
+an **unclean-end**, not a crash, record: `unclean-<UTC time>.txt`. It means only
+that the last run did not end cleanly. It cannot distinguish a power cut,
+forced termination, an out-of-memory kill, or a handler that could not run.
+Only file size/time and named trouble flags from the last log's tail are added,
+not arbitrary log text. Recovery runs before log rotation. The private marker keeps
+the host's selected destination (`logs/hookshot_log.txt`, or its beside-game fallback)
+or an externally redirected stderr file, rather than assuming a loose log.
+Live markers are skipped, even when two games use one folder; process-id liveness is not the test.
+SIGTERM, SIGINT and SIGHUP are deliberately not crash signals here. Logout,
+Ctrl-C or a test timeout can therefore leave an unclean-end record. Its fixed
+note says: "ended from outside or lost power, not necessarily a crash".
+Normal returns, control quit and window close/restart remove only their own
+marker and empty staging file, never earlier reports. A read-only
+folder disables recording without preventing play. Disk errors or an exhausted
+faulting stack can still prevent a record; this is not a crash-recovery facility.
+
+At startup, only the newest **15** crash/unclean text records are retained, by
+the UTC in their filenames (oldest first removed). A later crash can add one:
+at most 16 for sequential runs, or 17 with two games running together. Only
+regular files matching these exact names in `pending/` are pruned. Symlinks,
+directories, stall records, local-only dumps and completed menu reports are
+untouched. If removal fails, the extra file stays and one fixed warning follows
+the version/run-id banner. There is no pruning or cross-process wait in a crash.
+
+On Windows, `HOS_CRASH_MINIDUMP=1` additionally asks a startup-created worker for
+a dump in **`bug-reports/local-only/`**, after the text record is durable.
+Only an exception filter requests a dump; `hos_fatal` and renderer-fatal records
+remain text-only. The `vk: device lost:` prefix is captured before later driver
+queries, even if the terminal `vk: FATAL:` never arrives. The existing opt-in
+`RX_VK_FAULT_INFO` query before that prefix can still hang before capture.
+It is off by default, for a developer debugging their own build, and **must not
+be shared**: thread stacks can contain fragments of game data and private data.
+The text says `dump: off` or `dump: requested locally, not for sharing`; a request
+is not proof that DbgHelp succeeded. The failing thread waits at most two seconds.
+The worker writes a one-line `.outcome.txt` beside its local-only dump: written,
+failed, timed out waiting, or skipped because another report worker was using
+DbgHelp. The shared guard is non-blocking and is taken only on workers, before
+any thread suspension. The public text is never changed after publication.
+
+The exact flags are `MiniDumpNormal | MiniDumpFilterMemory |
+MiniDumpFilterModulePaths | MiniDumpWithoutOptionalData |
+MiniDumpWithoutAuxiliaryState`. Microsoft's
+[type reference](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/ne-minidumpapiset-minidump_type)
+defines Normal as the information for all threads' stack traces; the filters keep
+stack pointers needed for unwinding, remove module-path information, and reduce
+optional/auxiliary memory. The callback also excludes module code/data sections
+and CodeView/miscellaneous records (which can hold build paths). No full-memory,
+heap/private-memory, indirectly referenced memory, or data-segment flag is used.
+These filters **do not guarantee privacy**. Size depends on the threads and their
+stacks; a typical game-dump size has not been measured. The game-free Windows
+fixture prints its tiny child's actual dump size, not a game-size estimate.
+[Microsoft recommends a separate process, or a dedicated thread](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/nf-minidumpapiset-minidumpwritedump);
+even the dedicated worker can fail or stall after heap/loader corruption.
+
 ### Input for scripted runs
 
 | Switch | What it does |

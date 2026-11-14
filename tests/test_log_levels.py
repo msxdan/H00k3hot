@@ -48,6 +48,7 @@ CODE = r"""
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include "hos_report_prefixes.h"
 %(hos_enum)s
 struct HosThread { const char* name; };
 HosThread* cur;
@@ -55,6 +56,12 @@ volatile int hos_control_on;
 void hos_control_log(const char*) {}
 std::string queued;
 static int log_queue(const char* line) { queued = line; return 1; }
+std::string fatal_reason;
+int fatal_calls;
+static void hos_crash_record_fatal(const uint64_t*, const char* reason) {
+    fatal_reason = reason;
+    fatal_calls++;
+}
 %(tag)s
 %(hos_vlog)s
 void host_line(int level, const char* fmt, ...) {
@@ -92,6 +99,14 @@ int main() {
     host_line(HOS_LOG_DEBUG, "codec: y");
     want(queued, "[hos Main] [debug] codec: y\n", "host: debug, on a named thread");
     cur = nullptr;
+    want(std::to_string(fatal_calls), "0", "host: normal lines do not ask for a crash record");
+    host_line(HOS_LOG_WARN, "vk: device lost: reading the checkpoints");
+    want(fatal_reason, "device lost", "host: classify raw message before its level tag");
+    want(queued, "[hos host] [warn] vk: device lost: reading the checkpoints\n", "host: keep the warning tag");
+    host_line(HOS_LOG_ERROR, "vk: FATAL: stopped");
+    want(fatal_reason, "Vulkan fatal", "host: tagged fatal reaches the recorder");
+    want(queued, "[hos host] [error] vk: FATAL: stopped\n", "host: keep the error tag");
+    want(std::to_string(fatal_calls), "2", "host: one collector call per fatal message");
     logf("vk: device %%d", 1);
     want(got, "vk: device 1", "renderer: logf is info, untagged");
     logf_at(log_trace, "vk: program %%016llx not translated", 0x95fca6f01e3030aull);
@@ -128,7 +143,7 @@ def main():
         src, exe = Path(tmp) / "levels.cpp", Path(tmp) / ("levels" + (".exe" if os.name == "nt" else ""))
         src.write_text(code, encoding="utf-8")
         subprocess.run([a.cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-format-security",
-                        "-D_CRT_SECURE_NO_WARNINGS", str(src), "-o", str(exe)], check=True, timeout=180)
+                        "-D_CRT_SECURE_NO_WARNINGS", "-I", str(ROOT / "host"), str(src), "-o", str(exe)], check=True, timeout=180)
         r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
         sys.stdout.write(r.stdout)
         if r.returncode:
