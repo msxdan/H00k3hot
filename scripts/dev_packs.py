@@ -288,9 +288,20 @@ def clear_output(game):
             os.remove(p)
 
 
+def object_store():
+    """(nx2/object_store.py) The object store every base and pack on this PC shares, unless HOOKSHOT_OBJ_STORE names another (or
+    is empty or 0: none): a new base compiles only what no earlier one did. In the user's cache folder; on another drive than the
+    bases its objects are copied instead of linked, so set HOOKSHOT_OBJ_STORE to a folder on the bases' drive"""
+    if os.name == "nt":
+        return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Hookshot", "objects")
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "hookshot-objects")
+
+
 def run(cmd, cwd, env=None):
     print("+ " + " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=cwd, check=True, env=dict(os.environ, **(env or {})))
+    e = dict(os.environ, **(env or {}))
+    e.setdefault("HOOKSHOT_OBJ_STORE", object_store())
+    subprocess.run(cmd, cwd=cwd, check=True, env=e)
 
 
 def base_env(predict_s):

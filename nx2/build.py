@@ -44,6 +44,7 @@ import kit
 import lifted_c
 import rtgen
 import logo_rgba
+import object_store
 import ui_fonts
 import toolchain
 import version
@@ -55,6 +56,9 @@ OPUS = os.path.join(kit.HERE, "..", "third_party", "opus")
 ZSTD = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "zstd", "lib"))
 ZSTD_HOST = ("prompts.c", "hos_zstd.c")   # (the host files that use it: a mod's size table; the game's stream decode)
 OBJ_CACHE = os.path.join(kit.WORK, "objcache")
+# (HOOKSHOT_OBJ_STORE: one store of objects for every work folder, nx2/object_store.py. Its folder for this work folder's compiler
+# and headers, or None)
+OBJ_STORE = object_store.folder(kit.WORK)
 # (hookshot) work/hot_order.txt: the functions that run, hottest first (sampled), packed together by the linker; RX_NO_ORDER=1: off
 PGO = os.environ.get("RX_PGO", "")
 
@@ -1072,6 +1076,8 @@ def main():
     jobs = [(cc, s, os.path.join(obj_dir, os.path.basename(s)[:-2] + ".o"),
              hot_fl if os.path.basename(s).startswith("code_hot") else fl,
              shim_deps if os.path.dirname(s) == NX2_RT else deps) for s in srcs]
+    if KEPT and OBJ_STORE:   # (a kept object the folder let go that another work folder gave the store)
+        object_store.fetch(OBJ_STORE, OBJ_CACHE, [k[0] for k in KEPT.values()])
     if KEPT:   # (the kept translation is used only as it was: the same flags and headers, and every object still cached)
         stale = [os.path.basename(j[1]) for j in jobs if j[1] in KEPT and not os.path.exists(j[1]) and
                  (kept_part(j[3], j[4]) != KEPT[j[1]][2] or not os.path.exists(os.path.join(OBJ_CACHE, KEPT[j[1]][0] + ".o")))]
@@ -1279,6 +1285,13 @@ def main():
     GATE = None if os.environ.get("HOOKSHOT_MEM_GATE") == "0" else MemoryGate()
     eta_jobs = GATE.expected(a.jobs) if GATE else a.jobs   # (the countdown with the compilers the memory holds, not --jobs)
     counted, expected, pending = os.environ.get("HOOKSHOT_TIMES"), {}, []
+    if OBJ_STORE:   # (the objects this build needs that another work folder built: in the folder's cache before the plan counts them)
+        object_store.share(OBJ_CACHE, OBJ_STORE)   # (the folder's own first, those of a build that stopped before it shared them too)
+        for _, src, obj, fl, deps in jobs:
+            if (src, obj) not in PLANNED and os.path.exists(src):
+                PLANNED[(src, obj)] = key_of(src, fl, deps)
+        got = object_store.fetch(OBJ_STORE, OBJ_CACHE, [PLANNED[(j[1], j[2])] for j in jobs if (j[1], j[2]) in PLANNED])
+        print("object store %s: %d objects from it" % (OBJ_STORE, got), flush=True)
     if counted:
         work_jobs, keys = plan_jobs(jobs)
         PLANNED.update(keys)
@@ -1329,6 +1342,8 @@ def main():
     print("compiled in %.0fs, %d failed" % (time.time() - t0, still), flush=True)
     if still:
         return 1
+    if OBJ_STORE:
+        print("object store: %d new objects to it" % object_store.share(OBJ_CACHE, OBJ_STORE), flush=True)
     if a.standalone and not vk_only:
         write_kept(gen, jobs)
     vk_objs = {j[2] for j in vk_jobs}

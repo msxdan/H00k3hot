@@ -52,6 +52,7 @@ STARTED = time.time()   # (the build's total time, kept in build_times.json and 
 sys.path[:0] = [HERE, os.path.join(ROOT, "third_party", "a64-kit", "tools")]   # (python -I leaves the script folder off)
 import toolchain as _toolchain
 import disk as _disk
+import object_store as _object_store
 # (hookshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (HOOKSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
@@ -1127,6 +1128,17 @@ def _drop_stale_linux(work):
         f.write(stamp + chr(10))
 
 
+def object_stamps(obj_dir):
+    """The object keys the objects in obj_dir are stamped with (<obj>.sha1, nx2/build.py compile_one)"""
+    keys = []
+    with contextlib.suppress(OSError):
+        for f in os.listdir(obj_dir):
+            if f.endswith(".sha1"):
+                with contextlib.suppress(OSError), open(os.path.join(obj_dir, f)) as h:
+                    keys.append(h.read().strip())
+    return keys
+
+
 def prune_object_cache(work):
     """(issue 1287) The object cache down to the objects this build used: each object in sa/build/obj names its key in <obj>.sha1
     (nx2/build.py compile_one); cached objects no stamp names (earlier releases', other settings') go. Returns the bytes kept.
@@ -1844,6 +1856,10 @@ def forget_failed_build(work, linked, failed=()):
         print("the build failed before the link: the next one translates the game again, and compiles only the files not "
               "compiled yet", flush=True)
         return
+    # (HOOKSHOT_OBJ_STORE: the objects this link was made from go from the store as well, or the next try takes them from there)
+    store = _object_store.folder(work)
+    if store:
+        _object_store.forget(store, object_stamps(os.path.join(work, "sa", "build", "obj")))
     for sub in (os.path.join(work, "objcache"), os.path.join(work, "sa", "build", "obj")):
         shutil.rmtree(sub, ignore_errors=True)
     print("the build failed: the next one translates and compiles the game again (nothing of this one is reused)", flush=True)
@@ -2521,6 +2537,10 @@ def main(a=None):
                   "what changed (HOOKSHOT_KEEP_BUILD_FILES=1 keeps all)" % (
                       work, kept >> 20, "" if lift_kept is None else " and the translation's other files (%d MB)" % (lift_kept >> 20)),
                   flush=True)
+    # (HOOKSHOT_OBJ_STORE: the store's own clean-up, after the folder's; nx2/object_store.py prune)
+    removed, freed = _object_store.prune()
+    if removed:
+        print("object store: %d objects no work folder used lately let go (%d MB)" % (removed, freed >> 20), flush=True)
     total_seconds = time.time() - STARTED
     PHASES.enter(None)
     previous = record_times(work, run_files, compile_seconds, total_seconds, modules=plan[1],

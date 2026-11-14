@@ -317,6 +317,8 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `HOOKSHOT_LIFT_JOBS=<n>` | Processes that write the lifted C and make its edits (default the cores, at most 16, one per 2 GB free; on Windows, where they start as new processes, one per 0.75 GB free) |
 | `HOOKSHOT_KEEP_BUILD_FILES=1` | Keeps the lifted C and the objects after a build, so that the next one compiles only what changed |
 | `HOOKSHOT_PROMPT_JOBS=<n>` | Processes that draw the button prompts' faces (default one a face, at most the CPU threads and one per GB free) |
+| `HOOKSHOT_OBJ_STORE=<dir>` | One store of compiled objects for every work folder (`nx2/object_store.py`): a build in a new `--work` folder compiles only what no other folder built with the same compiler and headers. Hard links (a copy across drives), so keep it on the work folders' drive. Off when unset, empty or `0`; `scripts/dev_packs.py` turns it on (below) |
+| `HOOKSHOT_OBJ_STORE_GB=<n>`, `HOOKSHOT_OBJ_STORE_DAYS=<n>` | The store's own clean-up after each `make_game.py` build: an object no work folder holds goes once nobody used it for 14 days, and the oldest first while those come to more than 8 GB. One a work folder holds stays: it costs no space of its own |
 | `HOOKSHOT_FORCE_PROMPTS=1` | Regenerates button-prompt assets even when unchanged. Unset, empty, `0`, `false`, `off` and `no` (case-insensitive, surrounding spaces ignored) are off |
 | `HOOKSHOT_MINGW=<dir>`, `HOOKSHOT_MSVC=1` | The llvm-mingw to build with; the Visual Studio route instead |
 | `RX_CPM=<dir>`, `WGPU_NATIVE=<dir>` | The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native |
@@ -457,6 +459,10 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
   copies the caches play made or grew (pipelines, play files, programs) back into the base's game folder, and
   deletes the runtime, so every later runtime starts warm for those scenes. Only cache files are copied.
 - **One job at a time per base:** `base`, `pack`, `rt` and `warm` hold `<base>/dev_packs.busy` while they run.
+- **Objects shared by every base:** its builds use one [object store](#building) (`HOOKSHOT_OBJ_STORE`, by default
+  `~/.cache/hookshot-objects`, `%LOCALAPPDATA%\Hookshot\objects` on Windows), so a new base compiles only the files no
+  earlier base or pack on this PC compiled. On another drive than the bases it copies instead of linking: set
+  `HOOKSHOT_OBJ_STORE` to a folder on the bases' drive, or to `0` for none.
 
 For numbers, compare the runtime with one made by `rt` from no pack: same base, same caches, one difference.
 
