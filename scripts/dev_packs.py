@@ -83,10 +83,11 @@ MODULES = ((("hookshot.exe", "hookshot.map", "objs.rsp", "host_hos_main.o"),
            (("hookshot", None, "objs.rsp", "host_hos_main.o"), ("hookshot_vk.so", None, "vk_objs.rsp", "vk_vk_menu.o")))
 GAME, RENDERER = MODULES[0][0], MODULES[1][0]
 STAMPED_SOURCES = ("host/hos_main.c", "gpu/vk/vk_menu.cpp")
-# (nx2/build.py's shader stamp: every file in gpu/vk/{eden,sirit,compat}/ and these four; tests/test_dev_packs.py checks they agree)
-STAMP_DIRS = ("eden", "sirit", "compat")
-STAMP_FILES = ("vk_shader.cpp", "vk_bank.cpp", "vk_state.h", "vk_api.h")
-TRANSLATOR = tuple("gpu/vk/%s/" % d for d in STAMP_DIRS) + tuple("gpu/vk/" + f for f in STAMP_FILES)
+# (nx2/build.py's shader stamp is made of the files the checkout's own nx2/translator_files.py names (translator_changed); a
+# checkout from before that module stamped every file in gpu/vk/{eden,sirit,compat}/ and these four)
+OLD_TRANSLATOR = ("gpu/vk/eden/", "gpu/vk/sirit/", "gpu/vk/compat/", "gpu/vk/vk_shader.cpp", "gpu/vk/vk_bank.cpp",
+                  "gpu/vk/vk_state.h", "gpu/vk/vk_api.h")
+TRANSLATOR_FILES = "nx2/translator_files.py"
 RENDERER_ONLY = ("gpu/vk/", "third_party/imgui/", "third_party/fidelityfx")
 INCLUDE = re.compile(r'#\s*include\s+"([^"]+)"')
 NO_MODULE = ("docs/", "tests/", ".github/", ".forgejo/", ".claude/")   # (.forgejo: Hookshot's workflows and templates)
@@ -100,6 +101,18 @@ WRITTEN_IN_PLAY = ("hookshot_options.ini", "hookshot_log.txt", "hookshot_log.1.t
                    "hookshot_pipelines.bin.built.warming", "hookshot_prepare_skipped", "hookshot_load_start.txt",
                    "hookshot_load_start.txt.waited", "hookshot_pipeline_report.txt", "hookshot_frames.csv",
                    "hookshot_damaged_files.txt")
+
+
+def translator_changed(tree, changed):
+    """Whether the shader stamp of the checkout tree's build differs from its base's, given the files changed since (paths
+    relative to the checkout, / separated): a stamped file, or what says which files are stamped"""
+    path = os.path.join(tree, *TRANSLATOR_FILES.split("/"))
+    if not os.path.isfile(path):
+        return any(p.startswith(OLD_TRANSLATOR) for p in changed)
+    spec = importlib.util.spec_from_file_location("translator_files_for_packs", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return any(m.stamped(p) or p == TRANSLATOR_FILES for p in changed)
 
 
 def load_make_game(root=ROOT):
@@ -514,7 +527,7 @@ def cmd_pack(a):
             dst = os.path.join(pack, "files", rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(os.path.join(w["game_out"], rel), dst)
-    prepare = any(p.startswith(TRANSLATOR) for p in changed) or SEED in extra
+    prepare = translator_changed(tree, changed) or SEED in extra
     if a.prepare is not None:
         prepare = a.prepare
     with open(os.path.join(pack, "pack.json"), "w", encoding="utf-8") as f:

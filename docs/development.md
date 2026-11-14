@@ -101,7 +101,11 @@ The running game reads its switches from the environment or from `hookshot_env.t
 already set when the game starts keeps its value and the file's line for it is left out (the log says so). A switch
 that stands in for a menu row lasts for its run; the options file keeps the player's value (`env_override` in
 `gpu/vk/vk_menu.cpp`). Switches the shader translation reads are part of the program cache's stamp
-(`disk_stamp` in `gpu/vk/vk_shader.cpp`; `tests/test_program_stamp_knobs.py` checks the translator's). The build reads its own from the
+(`disk_stamp` in `gpu/vk/vk_shader.cpp`; `tests/test_program_stamp_knobs.py` checks the translator's). Its other part is the
+translator's own sources, as `nx2/translator_files.py` names them (`gpu/vk/{eden,sirit,compat}/`, `vk_shader.cpp`,
+`vk_bank.cpp`, `vk_state.h`; not `vk_api.h`, which the translator reads nothing from): any change to one of them, a comment
+included, has every player translate every program again at their next start, so what the translator does not read belongs
+elsewhere. The build reads its own from the
 environment. The README has the ones players are asked to try (`RX_VK_ASTC_RGBA8`, `RX_VK_LOW_SPEC`,
 `RX_VK_MOVIE_UPSCALE`, `RX_VK_SKIP_CODE`, `HOS_OOT_CHEATS`). A pull request that adds or changes a switch lists it in its description's
 *Flags and settings* table (CONTRIBUTING.md) and documents it here. There are several hundred more, most of them one-off
@@ -441,8 +445,8 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
     (`base` records them) that the change's build no longer makes is removed from the runtime; saves, settings, logs,
     the preparation's markers and every cache are never touched, and an adopted base records none.
   - **Prepare:** the runtime prepares again when the shader translator (`gpu/vk/{eden,sirit,compat}/`,
-    `vk_shader.cpp`, `vk_bank.cpp`, `vk_state.h`, `vk_api.h`: what `build.py` stamps the shader caches with) or the
-    shader seed changed; `--prepare` / `--no-prepare` decide instead.
+    `vk_shader.cpp`, `vk_bank.cpp`, `vk_state.h`: what `build.py` stamps the shader caches with, as
+    `nx2/translator_files.py` names them) or the shader seed changed; `--prepare` / `--no-prepare` decide instead.
     A base prepares once its outputs are recorded, as `make_game.py` does: `HOOKSHOT_NO_PREPARE` (set and not `0`)
     skips it, and a preparation that fails (no usable Vulkan, a driver that stopped responding) keeps the base, with
     the reason in `base.json`'s `not_prepared`, and leaves the work to its first start.
