@@ -646,7 +646,7 @@ WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WR
 # written (the exact bodies and FPX1's proofs assume it). RX_MARCH=x86-64: the old baseline
 # (issue 363: a Xeon E5-2667 v2 (Ivy Bridge, no AVX2) built the game and then stopped at its first AVX2 instruction,
 # 0xc000001d. The game is built on the PC it runs on: a CPU without x86-64-v3's features gets x86-64-v2, or x86-64)
-from host_cpu import host_march, host_mtune   # (make_game.py asks it too: the AppImage's renderer)
+from host_cpu import host_march, native_cpu   # (make_game.py asks it too: the AppImage's renderer)
 
 MARCH = os.environ.get("RX_MARCH") or host_march()
 if os.environ.get("RX_MARCH"):
@@ -655,9 +655,25 @@ if os.environ.get("RX_MARCH"):
 elif MARCH != "x86-64-v3":
     print("build: this CPU has no AVX2: the game is built for %s (a little slower)" % MARCH, flush=True)
 CPU = ["-march=" + MARCH, "-ffp-contract=off"]
-MTUNE = os.environ.get("RX_MTUNE") or host_mtune()
-if MTUNE:
-    CPU += ["-mtune=" + MTUNE]
+# (issue 182) A CPU with x86-64-v3's features gets the game built for itself, -march=native: what it has beyond v3 (AVX-512 and
+# the rest), and tuned for it (native tunes as well, the Steam Deck's Zen 2 included: no tuning flag of our own). RX_MARCH=x86-64-v3
+# builds as before. native names no CPU, and the object keys are made from the flags, so the CPU clang resolves it to goes into
+# the flags too (-DHOOKSHOT_NATIVE_CPU=<cpu>_<tune>_<features>): another CPU (a new one, the disk in another PC) compiles again
+# instead of linking objects made for instructions it may lack. If clang can't say, the default stays x86-64-v3, and an
+# RX_MARCH=native stops the build.
+_CLANG = toolchain.find("clang")
+_native = None
+if not os.environ.get("RX_MARCH") and MARCH == "x86-64-v3" and os.path.isfile(_CLANG):
+    _native = native_cpu(_CLANG, target() + ["-march=native"] + CPU[1:])
+    if _native:
+        MARCH, CPU[0] = "native", "-march=native"
+if MARCH == "native" and not _native:
+    _native = native_cpu(toolchain.need(_CLANG), target() + CPU)
+    if not _native:
+        sys.exit("build: clang does not say what -march=native is on this PC: set RX_MARCH to a CPU level")
+if _native:
+    print("build: the game is built for this PC's CPU (%s)" % _native, flush=True)
+    CPU += ["-DHOOKSHOT_NATIVE_CPU=" + _native]
 OPT = "O1"   # (the lifted code's level; code_hot.c's is RX_HOT_OPT)
 
 

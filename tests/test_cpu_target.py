@@ -56,21 +56,6 @@ class HostMarch(unittest.TestCase):
     def test_unreadable_cpu_keeps_v3(self):
         self.assertEqual(march_on_linux("processor\t: 0\n"), "x86-64-v3")
 
-    def test_steamdeck_mtune(self):
-        real_open = builtins.open
-
-        def fake_deck(path, *args, **kwargs):
-            if path == "/proc/cpuinfo":
-                return io.StringIO("model name\t: AMD Custom APU 0405\nflags\t\t: fpu\n")
-            return real_open(path, *args, **kwargs)
-
-        with mock.patch.object(host_cpu.os, "name", "posix"), mock.patch.object(builtins, "open", fake_deck), \
-                mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(host_cpu.host_mtune(), "znver2")
-
-        with mock.patch.dict(os.environ, {"RX_STEAMDECK": "1"}, clear=True):
-            self.assertEqual(host_cpu.host_mtune(), "znver2")
-
     def test_windows(self):
         class K32:
             def __init__(self, present):
@@ -106,6 +91,62 @@ class HostMarch(unittest.TestCase):
                 self.assertEqual(out.getvalue(), "", env)
             if env:
                 self.assertNotIn("no AVX2", out.getvalue(), env)
+
+
+def clang_says(cpu, feats, tune=None):
+    """What `clang -march=native -###` writes to stderr, cut to the cc1 line's parts that matter"""
+    words = ['"/usr/bin/clang-23"', '"-cc1"', '"-triple"', '"x86_64-unknown-linux-gnu"']
+    if cpu:
+        words += ['"-target-cpu"', '"%s"' % cpu]
+    for f in feats:
+        words += ['"-target-feature"', '"%s"' % f]
+    if tune:
+        words += ['"-tune-cpu"', '"%s"' % tune]
+    return "clang version 23.1.5\nTarget: x86_64-unknown-linux-gnu\n " + " ".join(words) + "\n"
+
+
+class NativeCpu(unittest.TestCase):
+    """(issue 182) -march=native is keyed by the CPU clang resolves it to: another CPU, another key"""
+
+    def native(self, stderr=None, raises=None):
+        run = mock.MagicMock(side_effect=raises) if raises else \
+            mock.MagicMock(return_value=mock.MagicMock(stderr=stderr, stdout=""))
+        with mock.patch("subprocess.run", run):
+            return host_cpu.native_cpu("clang", ["-march=native"]), run
+
+    def test_cpu_tune_and_features_name_it(self):
+        zen4, run = self.native(clang_says("znver4", ["+avx512f", "+avx2", "-amx-tile"], "znver4"))
+        self.assertTrue(zen4.startswith("znver4_znver4_"), zen4)
+        self.assertIn("-###", run.call_args[0][0])
+        self.assertIn("-march=native", run.call_args[0][0])
+        # (the feature list's order is not a change)
+        self.assertEqual(self.native(clang_says("znver4", ["-amx-tile", "+avx2", "+avx512f"], "znver4"))[0], zen4)
+
+    def test_another_cpu_another_name(self):
+        zen4 = self.native(clang_says("znver4", ["+avx512f", "+avx2"]))[0]
+        # (the same model with AVX-512 off, as some BIOSes and VMs do: the name alone would not tell them apart)
+        no512 = self.native(clang_says("znver4", ["-avx512f", "+avx2"]))[0]
+        zen3 = self.native(clang_says("znver3", ["+avx2"]))[0]
+        self.assertEqual(len({zen4, no512, zen3}), 3)
+        self.assertTrue(zen3.startswith("znver3_znver3_"), zen3)   # (no -tune-cpu: tuned for the CPU itself)
+
+    def test_no_answer_is_none(self):
+        self.assertIsNone(self.native(clang_says(None, ["+avx2"]))[0])
+        self.assertIsNone(self.native(clang_says("native", []))[0])
+        self.assertIsNone(self.native("")[0])
+        self.assertIsNone(self.native(raises=OSError("no clang"))[0])
+
+    def test_build_keys_and_defaults_it(self):
+        build = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
+        start = build.index('_CLANG = toolchain.find("clang")')
+        block = build[start:build.index("OPT = ", start)]
+        # (native only where the CPU chose v3, never over an RX_MARCH; its name is in the flags, so in every object key)
+        self.assertIn('if not os.environ.get("RX_MARCH") and MARCH == "x86-64-v3"', block)
+        self.assertIn('CPU += ["-DHOOKSHOT_NATIVE_CPU=" + _native]', block)
+        self.assertIn("sys.exit(", block)   # (an RX_MARCH=native that clang can't resolve stops the build)
+        # (native tunes for the CPU as well: no -mtune of our own, which would override it)
+        self.assertNotIn("-mtune", build)
+        self.assertNotIn("host_mtune", build)
 
 
 class AppImageCheck(unittest.TestCase):
