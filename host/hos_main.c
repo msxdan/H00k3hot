@@ -1419,13 +1419,17 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
 }
 #endif
 
-int hos_oot_flight_shortcut_ready(void) {
+int hos_oot_player_seen(void) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
     const int64_t seen = __atomic_load_n(&flight_player_seen, __ATOMIC_RELAXED);
     return seen && hos_now_ns() - seen < 250000000;
 #else
     return 0;
 #endif
+}
+
+int hos_oot_flight_shortcut_ready(void) {
+    return hos_oot_player_seen();
 }
 
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
