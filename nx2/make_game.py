@@ -1882,13 +1882,19 @@ def ngx_platform():
     return "linux" if LINUX else "windows"
 
 
+def ngx_folder():
+    """Where --fetch-ngx-sdk keeps NVIDIA's DLSS SDK between builds: HOOKSHOT_NGX_SDK, else work/ngx-sdk here"""
+    return os.environ.get("HOOKSHOT_NGX_SDK") or os.path.join(ROOT, "work", "ngx-sdk")
+
+
 def fetch_ngx_sdk(a):
     """--fetch-ngx-sdk (the Hookshot Builder's NVIDIA DLSS tick): NVIDIA's DLSS SDK into HOOKSHOT_NGX_SDK before the build, once
     NVIDIA's license was accepted (--accept-nvidia-license: the builder asked first). Only what is missing or not the file
     expected is downloaded"""
-    sdk = os.environ.get("HOOKSHOT_NGX_SDK", "")
-    if not sdk:
-        fail("--fetch-ngx-sdk needs HOOKSHOT_NGX_SDK, the folder NVIDIA's DLSS SDK goes into.")
+    # (the Builder drops a HOOKSHOT_NGX_SDK set on the PC, so a launcher asking through --cli has none: the folder is ours then,
+    # and the rest of the build, which reads the variable, finds the SDK there)
+    sdk = ngx_folder()
+    os.environ["HOOKSHOT_NGX_SDK"] = sdk
     if not a.accept_nvidia_license:
         fail("NVIDIA DLSS needs NVIDIA's license accepted first (--accept-nvidia-license).")
     ngx = ngx_script()
