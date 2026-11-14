@@ -7,6 +7,9 @@ fewer than 8 logical processors, nor on a CPU of more than one kind with fewer t
 On Linux the classes come from /sys/devices/cpu_core/cpus, the performance cores' cpulist (parse_cpu_list), and
 hos_reserved_cpus asks last_fastest_core there before it falls back to the last core.
 
+The replay runs on that core on Linux too (replay_pin_mask, gpu/vk/vk_replay.cpp), and a thread made inside a pinned
+replay starts with the process's affinity, not the pin (host/posix/win32_posix.c).
+
 python -I -B tests/test_reserved_core.py [--cxx clang++]
 """
 import argparse
@@ -44,6 +47,18 @@ def main():
         'hos_reserved_cpus no longer asks last_fastest_core on Linux'
     assert '/sys/devices/cpu_core/cpus' in linux and 'parse_cpu_list(' in linux and 'pick_reserved_core(' in linux, \
         "Linux's last_fastest_core no longer reads the performance cores from /sys/devices/cpu_core/cpus"
+    vk_replay = (ROOT / 'gpu/vk/vk_replay.cpp').read_text(encoding='utf-8')
+    pin_mask = block(vk_replay, 'uint64_t replay_pin_mask()')
+    assert '_WIN32' not in pin_mask and 'host->reserved_cpus' in pin_mask, \
+        'replay_pin_mask must use host->reserved_cpus on Linux as well as Windows'
+    posix = (ROOT / 'host/posix/win32_posix.c').read_text(encoding='utf-8')
+    assert 'apply_process_affinity(t->th)' in block(posix, 'static HThread *thread_self(void)') and \
+        'apply_process_affinity(t->th)' in block(posix, 'static void *thread_entry(void *p)'), \
+        'win32_posix.c must reset new threads to process_affinity so helper threads do not inherit ReplayPin on Linux'
+    # (hookshot) a thread its maker pinned by its handle before it started keeps that pin: the reset and the pin under one lock
+    assert 'if (!t->pinned) apply_process_affinity(t->th)' in block(posix, 'static void *thread_entry(void *p)') and \
+        't->pinned = 1' in block(posix, 'DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask)'), \
+        "thread_entry's reset must leave a thread SetThreadAffinityMask pinned already"
     fixture = r'''
 #include <cstdint>
 #include <cstdio>
