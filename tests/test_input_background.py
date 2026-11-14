@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ("foreground", "script-background", "headless", "noactivate", "live-background",
          "no-script-background", "exclusive-foreground", "exclusive-background", "pads-env", "pads-menu", "pads-off",
          "pads-insert",
-         "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background")
+         "frame-hold", "live-frame", "reuse-frame", "wall", "zero", "empty", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle")
 
 
 def main():
@@ -66,6 +66,7 @@ def main():
     constants += block(api, "enum { HOS_BIND_PAD") + ";\n"   # (the live input's !bind)
     constants += block(api, "enum { HOS_OPT_AUTO_RUN") + ";\n"   # (Auto run: off here, rx_option answers 0)
     constants += (ROOT / "host/auto_run.h").read_text(encoding="utf-8") + "\n"
+    constants += block(api, "enum { HOS_OPT_WALK_MODE") + ";\n"   # (the Walk key's rows: read_input asks for them)
     for name in ("STATE_SIZE", "NPAD_NO1", "ATTR_CONNECTED"):
         matches = re.findall(r"^#define " + name + r"\s+[^\n]+", hid, re.M)
         assert len(matches) == 1, name
@@ -80,6 +81,7 @@ volatile int hos_oot_live_action;
 int hos_oot_flight_shortcut_ready(void) { CHECK(!"unexpected cheat readiness query"); return 0; }
 void rx_option_set(int id, int value) { (void)id; (void)value; CHECK(!"unexpected cheat option change"); }
 int hos_oot_player_free(void) { return 1; }
+void hos_oot_autoload_input(void) {}
 """
     # (the host's own presses and stick, for the game's menus' mouse (host/oot_menu.c): none here; the player's input
     # time it hides the mouse by: not looked at)
@@ -97,6 +99,9 @@ static void player_used(void) {}
         block(hid, "static int mouse_vk_slot("), re.search(r"^static int mouse_armed\[5\];", hid, re.M).group(0),
         block(hid, "static void mouse_buttons_arm("), block(hid, "static int bound_down("),
         block(hid, "static void oc_notes("), block(hid, "static uint64_t oc_pad_word("),
+        # (walking on the keyboard: the movement keys' tilt, read_input asks for it)
+        block(hid, "static int walk_held("), block(hid, "enum { WALK_SPEED_DEFAULT") + ";",
+        block(hid, "static int walk_percent("), block(hid, "static void move_keys_stick("),
         block(hid, "static int flight_jump_shortcut("), read, block(hid, "static void npad_states(")))
     glue = (ROOT / "host/mkw_glue.c").read_text(encoding="utf-8")
     actual += "\n" + "\n".join(block(glue, "uint64_t " + name + "(")
@@ -124,7 +129,7 @@ static void player_used(void) {}
              "-I" + str(folder), str(ROOT / "tests/input_background_test.c"), "-o", str(exe)])
         for case in ((a.case,) if a.case else CASES):
             case_env = dict(env)
-            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "pads-insert", "hold-toggle", "hold-mouse", "hold-background"):
+            if case not in ("live-background", "no-script-background", "live-frame", "reuse-frame", "pads-insert", "hold-toggle", "hold-mouse", "hold-background", "walk-toggle"):
                 case_env["HOS_INPUT_SCRIPT"] = "0:A+LUP/200"
             if case in ("frame-hold", "live-frame", "reuse-frame"):
                 case_env["HOS_INPUT_FRAME_CLOCK"] = "1"

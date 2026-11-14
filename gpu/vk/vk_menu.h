@@ -62,6 +62,10 @@ struct Options {
     int auto_run = 0;  // (hookshot) Auto run: A (the sprint) kept held after it is let go (host/auto_run.h)
     int mouse_sens = 100; // the mouse's sensitivity in percent: 0.1 degrees a count at 100 with native look (host/nn_hid.c)
     int mouse_invert = 0; // the mouse's up and down swapped
+    int walk_mode = 0;    // (hookshot) the Walk key (the Controls page): 0 Link walks while it is held, 1 one press walks and the next
+                          // runs again (host/nn_hid.c walk_held: HOS_OPT_WALK_MODE, 49)
+    int walk_speed = 45;  // (hookshot) how far the movement keys tilt the left stick while Link walks, percent, 15 to 90
+                          // (host/nn_hid.c: HOS_OPT_WALK_SPEED, 50)
     int text_speed = 0;   // how fast dialogue prints: 0 the game's, 1 2x, 2 4x, 3 instant (host/nn_vi.c, nx2/oot_patches.py; HOS_TEXT_SPEED)
     int damage_taken = 1; // 0 Half, 1 Normal, 2 Double, 3 Quadruple (host/oot_damage.c)
     int fov = 100;        // vertical gameplay field of view, 50..150% of the game's current angle (host/oot_fov.c)
@@ -107,6 +111,7 @@ struct Options {
     int menu_lang = 0;    // this menu's language: 0 Auto (the game's own, language.txt), else menu_i18n::kLangs[menu_lang - 1]
                           // (vk_menu_i18n.cpp). Saved as menu_language
     int mic = 1;          // (hookshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
+    int skip_title = 0;   // (hookshot) start with the most recent save, pressing through the title and its file list (host/oot_autoload.c); read at the start
 };
 extern Options opts;
 constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_auto_for_gpu, auto_settings.h)

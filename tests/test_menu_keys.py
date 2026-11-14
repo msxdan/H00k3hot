@@ -28,7 +28,7 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE = r'''#include "gpu/vk/vk_menu_keys.h"
-#include "gpu/vk/vk_api.h"
+// API_ENUMS
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -229,9 +229,11 @@ static int input_option(int id) {
 
 static void test_saved() {
     CHECK(Options{}.hold_toggle == 0);
-    loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_zl=0\ntoggle_a=9\ntoggle_move_up=1\ntoggle_plus=1\ntoggle_minus=1\n");
+    loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_zl=0\ntoggle_a=9\ntoggle_move_up=1\ntoggle_plus=1\ntoggle_minus=1\ntoggle_walk=1\n");
     CHECK(opts.hold_toggle == (1 << HOS_SW_R));
     CHECK(input_option(HOS_OPT_HOLD_TOGGLE) == opts.hold_toggle);
+    CHECK(Options{}.walk_mode == 0 && Options{}.walk_speed == 45);
+    CHECK(opts.walk_mode == 0 && opts.walk_speed == 45);   // toggle_walk is not a Walk mode setting
     loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_r=0\n");
     CHECK(opts.hold_toggle == 0);
     // (from before the version Esc came with, ESC_FROM (-1, no line: before 2): Insert or F1 was the default, written
@@ -263,10 +265,15 @@ def main():
     p.add_argument("--cxx", default="g++")
     a = p.parse_args()
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
+    api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
+    # The public header pulls in C-only NVN assertions; use its real enums as test_pad_layout does.
+    enums = [re.search(r"enum \{ " + first + r"\b.*?\};", api, re.S).group(0)
+             for first in ("HOS_SW_A", "HOS_KEY_MOVE_UP", "HOS_OPT_HOLD_TOGGLE")]
     tick = menu[menu.index("void menu_tick() {"):]
     key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (hookshot) the gamepads")]
     esc_at = tick.index("    const bool esc_opens")
-    esc_block = tick[esc_at:tick.index("    if (open_now.load() && page == 5) {", esc_at)]
+    # (the Esc block ends where the keys' branches begin: the text field's first, as the Insert menu's text fields have it)
+    esc_block = tick[esc_at:tick.index("    if (open_now.load() && editing) {", esc_at)]
     tx_at = menu.index("const char* tx_menu_shortcut(int v) {")
     tx = menu[tx_at:menu.index("\n}\n", tx_at) + 3]
     header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
@@ -295,7 +302,7 @@ def main():
                 .replace("    // KEY_POLL", key_poll).replace("    // ESC_BLOCK", esc_block)
                 .replace("// INI_KEY", ini_key).replace("// BIND_NAMES", bind_names).replace("// TOGGLE_OPTION", toggle_option).replace("    // LOAD_OPTIONS", load)
                 .replace("SAVED_VERSION", saved_version.group(1)).replace("ESC_FROM", esc_from.group(1)))
-    fixture = FIXTURE.replace("// KEYBOARD_FIXTURE", keyboard)
+    fixture = FIXTURE.replace("// API_ENUMS", "\n".join(enums)).replace("// KEYBOARD_FIXTURE", keyboard)
     with tempfile.TemporaryDirectory(prefix="menu-keys-") as tmp:
         cpp, exe = Path(tmp) / "fixture.cpp", Path(tmp) / "fixture"
         cpp.write_text(fixture, encoding="utf-8")
