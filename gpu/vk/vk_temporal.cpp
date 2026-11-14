@@ -51,6 +51,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "dlss_actor.h"
@@ -190,11 +191,17 @@ struct State {
         SkinnedDraw k;
         uint64_t key = 0;
         uint32_t nbones = 0;
-        // (its pose as the draw saw it, read at the draw with ub_read: the origin (12 bytes, then 4 of padding), then the
-        // nbones bones. Empty: not read, and the pose is copied from the game's memory at the upscale as before)
-        std::vector<uint8_t> pose;
+        // (its pose as the draw saw it, read at the draw with ub_read: at this byte of pose_bytes, the origin (12 bytes, then
+        // 4 of padding), then the nbones bones. kNoPose: not read, and the pose is copied from the game's memory at the upscale
+        // as before)
+        static constexpr uint32_t kNoPose = UINT32_MAX;
+        uint32_t pose = kNoPose;
     };
     std::vector<Skin> skins;
+    // (the poses of skins read at their draws, one after another: one buffer kept from frame to frame, its room reused, in
+    // place of an allocation of up to 13 KB a draw. Emptied when the first of a frame's skins is noted)
+    std::vector<uint8_t> pose_bytes;
+    std::chrono::steady_clock::time_point poses_time{};   // (when poses (the frame before's, for the next) were taken)
     struct Pose {
         uint32_t at = 0, nbones = 0;   // (bytes into its buffer: the origin, then the bones from at + 16)
         uint64_t frame = 0;
@@ -559,28 +566,44 @@ int actor_motion(VkCommandBuffer cmd, const Camera& cam, const float* before, ui
     // GPU's order as the copies from the game's memory had it, and no write into a buffer a frame in flight still reads)
     State::Upload& stage = s.pose_stages[s.pose_stage_at];
     s.pose_stage_at = (s.pose_stage_at + 1) % (int)(sizeof s.pose_stages / sizeof s.pose_stages[0]);
-    const bool any_read = std::any_of(skins.begin(), skins.end(), [](const State::Skin& k) { return !k.pose.empty(); });
+    const bool any_read =
+        std::any_of(skins.begin(), skins.end(), [](const State::Skin& k) { return k.pose != State::Skin::kNoPose; });
     if (any_read && !stage.buffer &&
         !create_buffer_cached(kPoseBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, stage.buffer, stage.memory, &stage.map))
         stage = {};
     std::vector<VkBufferCopy> staged;
     // (which of the frame before's draws each of this frame's is. A draw with its pose read at the draw pairs by place (its
     // origin plus its bones' mean translation: dlss_actor::place_of): all copies of its model at once, the nearest pairs
-    // first, never across more than RX_VK_DLSS_ACTOR_REACH world units between two engine frames (default 1: a running Link
-    // moves about 0.1 a frame, the Gossip Stones stand 2.3 apart; after a long frame a fast actor can go further and keeps the
-    // camera's motion for that frame): dlss_actor::pair_by_place. Else the same n-th draw of the model as before)
-    static const float reach = [] {
+    // first, or by draw order where that is as good, never further apart than the reach: dlss_actor::pair_by_place. Else
+    // the same n-th draw of the model as before.
+    // The reach is a speed, RX_VK_DLSS_ACTOR_REACH world units a second (default 60), times the time between the two poses,
+    // that time taken as 1/60 s at the least and 1/30 s at the most. It holds for a model drawn once (Link, Epona, a boss) too,
+    // since a lone copy can be another one (a Gossip Stone drawn by the other model the frame before: this model's only
+    // copy then is the next stone, 2.3 away), so it must not refuse an actor that really moved: as a distance a frame, a
+    // hitch or a low base frame rate (frame generation from 30 fps) took actors past it and they lost their motion for that
+    // frame, ghosting the ones that move most. 60 a second is 1 a frame at 60 fps, and some ten times a running Link (about
+    // 6 a second). The 1/30 s keeps the reach (2 at the default) under the stones' 2.3 after any gap: past it, draw order,
+    // which wins whenever it pairs more copies, pairs a whole row with its neighbours (each stone's frame before the next
+    // one's, once a stone changes model), and a lone stone takes its neighbour. The cost: across a gap longer than 1/30 s (a
+    // hitch, a base under 30 fps) an actor that moved more than 2 units keeps only the camera's motion for that frame)
+    static const float speed = [] {
         const char* e = getenv("RX_VK_DLSS_ACTOR_REACH");
-        if (!e || !*e) return 1.0f;
+        if (!e || !*e) return 60.0f;
         char* end = nullptr;
         const float v = strtof(e, &end);
         const bool ok = end != e && !*end && std::isfinite(v) && v >= 0.0f;
-        logf("vk: actor motion: copies of a model pair within %g world units a frame (RX_VK_DLSS_ACTOR_REACH=%s%s)",
-             ok ? (double)v : 1.0, e, ok ? "" : ": not a number of 0 or more, so the default");
-        return ok ? v : 1.0f;
+        logf("vk: actor motion: copies of a model pair within %g world units a second (RX_VK_DLSS_ACTOR_REACH=%s%s)",
+             ok ? (double)v : 60.0, e, ok ? "" : ": not a number of 0 or more, so the default");
+        return ok ? v : 60.0f;
     }();
+    const std::chrono::steady_clock::time_point taken = std::chrono::steady_clock::now();
+    const double between = s.poses_time == std::chrono::steady_clock::time_point{}
+                               ? 1.0 / 60.0
+                               : std::chrono::duration<double>(taken - s.poses_time).count();
+    s.poses_time = taken;
+    const float reach = speed * (float)std::clamp(between, 1.0 / 60.0, 1.0 / 30.0);
     const auto read_at_draw = [&](const State::Skin& k) {
-        return !k.pose.empty() && stage.map && k.pose.size() == 16 + (size_t)k.nbones * 48;
+        return k.pose != State::Skin::kNoPose && stage.map && (size_t)k.pose + 16 + (size_t)k.nbones * 48 <= s.pose_bytes.size();
     };
     struct Copies {
         std::vector<dlss_actor::Placed> now, then;
@@ -599,18 +622,20 @@ int actor_motion(VkCommandBuffer cmd, const Camera& cam, const float* before, ui
         const State::Skin& k = skins[i];
         if (k.k.depth != cam.depth || !read_at_draw(k)) continue;
         float* place = &places[i * 3];
-        dlss_actor::place_of(k.pose.data(), k.nbones, place);
+        dlss_actor::place_of(s.pose_bytes.data() + k.pose, k.nbones, place);
         Copies& c = models[k.key >> 8];
         c.now.push_back({{place[0], place[1], place[2]}, (int)(k.key & 0xff)});
         c.skin.push_back(i);
     }
     std::vector<uint64_t> pair_key(skins.size(), 0);
     std::vector<char> paired(skins.size(), 0);
+    std::unordered_set<uint64_t> taken_by_place;   // (the frame before's draws paired by place: not a fallback's by n-th too)
     for (const auto& [model, c] : models) {
         if (c.now.empty() || c.then.empty()) continue;
         const std::vector<int> pairs = dlss_actor::pair_by_place(c.now, c.then, reach);
         for (size_t a = 0; a < pairs.size(); a++)
-            if (pairs[a] >= 0) pair_key[c.skin[a]] = c.key[pairs[a]], paired[c.skin[a]] = 1;
+            if (pairs[a] >= 0)
+                pair_key[c.skin[a]] = c.key[pairs[a]], paired[c.skin[a]] = 1, taken_by_place.insert(c.key[pairs[a]]);
     }
     uint32_t at = 0;
     for (size_t i = 0; i < skins.size(); i++) {
@@ -621,7 +646,7 @@ int actor_motion(VkCommandBuffer cmd, const Camera& cam, const float* before, ui
         const bool placed = read_at_draw(k);
         const float* place = &places[i * 3];
         if (placed) {
-            std::memcpy((uint8_t*)stage.map + at, k.pose.data(), bytes);
+            std::memcpy((uint8_t*)stage.map + at, s.pose_bytes.data() + k.pose, bytes);
             staged.push_back({at, at, bytes});
             s.poses_read++;
         } else {
@@ -642,11 +667,14 @@ int actor_motion(VkCommandBuffer cmd, const Camera& cam, const float* before, ui
         const uint32_t mine = at;
         at += (bytes + 15) & ~15u;
         // (the frame before's draw it pairs with: by place (above) when that frame's copies of its model were read at their
-        // draws too, else its n-th, as before)
+        // draws too, else its n-th, as before, unless that one is already another draw's by place)
         auto it = old.end();
         const auto m = placed ? models.find(k.key >> 8) : models.end();
-        if (m == models.end() || m->second.then.empty()) it = old.find(k.key);
-        else if (paired[i]) it = old.find(pair_key[i]);
+        if (m == models.end() || m->second.then.empty()) {
+            if (!taken_by_place.count(k.key)) it = old.find(k.key);
+        } else if (paired[i]) {
+            it = old.find(pair_key[i]);
+        }
         if (!history || it == old.end() || it->second.frame != s.last_frame || it->second.nbones != k.nbones) {
             s.actor_skipped++;
             continue;
@@ -766,6 +794,7 @@ void drop_all() {
                 u = {};
             }
     s.poses.clear(), s.skins.clear(), s.model_bones.clear();
+    s.pose_bytes = {}, s.poses_time = {};
     if (!s.depth_views.empty()) {
         auto old = std::move(s.depth_views);
         s.depth_views.clear();
@@ -922,37 +951,63 @@ void temporal_note_skinned_draw(const SkinnedDraw& k) {
     static const bool off = env_switch("RX_VK_DLSS_ACTORS") == 0;
     if (off || !temporal_wanted() || !k.depth || !k.bones || k.bones_size < 48 || !k.object || k.object_size < 0x4c) return;
     State& s = st();
-    std::lock_guard lk(s.mu);
-    if (s.skins.size() >= 512) s.skins.clear();   // (no upscale for a while: what was kept is stale)
-    struct Timed {
-        State& s;
-        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-        ~Timed() { s.actor_ns += (std::chrono::steady_clock::now() - t0).count(); }
-    } timed{s};
-    State::Skin d;
-    d.k = k;
+    const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    // (the time this draw's actor motion costs, less the time it waited for the lock: another thread's work there is counted
+    // by that thread, and the wait would count it twice. Added under the lock)
+    int64_t waited = 0;
+    const auto take = [&] {
+        const std::chrono::steady_clock::time_point w = std::chrono::steady_clock::now();
+        s.mu.lock();
+        waited += (std::chrono::steady_clock::now() - w).count();
+    };
+    const auto spent = [&] { s.actor_ns += (std::chrono::steady_clock::now() - t0).count() - waited; };
     const uint64_t model = dlss_actor::key(k.vbuf, k.ibuf, k.count, k.base_vertex, k.program, 0);
-    // (only the bones its vertices use are taken: a palette holds up to 280, a model uses a few dozen)
-    auto mb = s.model_bones.find(model);
-    if (mb == s.model_bones.end()) {
-        if (s.model_bones.size() > 4096) s.model_bones.clear();
-        mb = s.model_bones.emplace(model, bones_used(k)).first;
+    uint32_t nbones = 0;
+    {
+        take();
+        std::lock_guard lk(s.mu, std::adopt_lock);
+        // (only the bones its vertices use are taken: a palette holds up to 280, a model uses a few dozen)
+        auto mb = s.model_bones.find(model);
+        if (mb == s.model_bones.end()) {
+            if (s.model_bones.size() > 4096) s.model_bones.clear();
+            mb = s.model_bones.emplace(model, bones_used(k)).first;
+        }
+        nbones = (uint32_t)std::min<uint64_t>(mb->second, std::min<uint64_t>(k.bones_size / 48, 280));
+        if (!nbones) return spent();
     }
-    d.nbones = (uint32_t)std::min<uint64_t>(mb->second, std::min<uint64_t>(k.bones_size / 48, 280));
-    if (!d.nbones) return;
     // (its pose as this draw sees it: the origin and bones at the stream's place (ub_read: the submission's memory with the
     // uniform updates before here over it). Copied from the game's memory at the upscale instead, a draw's pose could be another
-    // frame's or another draw's (the place pair_by_place needs, too). RX_VK_DLSS_ACTOR_LIVE=1: as before, for an A/B)
+    // frame's or another draw's (the place pair_by_place needs, too). RX_VK_DLSS_ACTOR_LIVE=1: as before, for an A/B.
+    // Read without the lock, into this thread's own buffer (its room kept from draw to draw); the lock is taken only to add it
+    // to the frame's poses. ub_read is this recording thread's view of the stream, as the draw's own reads of its uniforms.
+    // A limit: this reads what the CPU wrote, the submission's memory and the stream's inline uniform updates, so it holds for
+    // bone palettes and object blocks the game writes on the CPU. Nothing here checks that no palette is written on the GPU
+    // (a buffer copy or a compute pass earlier in the stream): one that is would read stale and still count as read at the
+    // draw, where the copy at the upscale, from the GPU's buffer, has it right. RX_VK_DLSS_ACTOR_LIVE=1 takes that copy for
+    // every draw)
     static const bool live = env_switch("RX_VK_DLSS_ACTOR_LIVE") == 1;
+    thread_local std::vector<uint8_t> pose;
+    bool read = false;
     if (!live) {
-        d.pose.resize(16 + (size_t)d.nbones * 48);
-        if (!ub_read(k.object + 0x40, d.pose.data(), 12) || !ub_read(k.bones, d.pose.data() + 16, (uint64_t)d.nbones * 48))
-            d.pose.clear();
+        pose.resize(16 + (size_t)nbones * 48);
+        read = ub_read(k.object + 0x40, pose.data(), 12) && ub_read(k.bones, pose.data() + 16, (uint64_t)nbones * 48);
+    }
+    take();
+    std::lock_guard lk(s.mu, std::adopt_lock);
+    if (s.skins.size() >= 512) s.skins.clear();   // (no upscale for a while: what was kept is stale)
+    if (s.skins.empty()) s.pose_bytes.clear();    // (a frame's first: the poses read before are gone with their skins)
+    State::Skin d;
+    d.k = k;
+    d.nbones = nbones;
+    if (read) {
+        d.pose = (uint32_t)s.pose_bytes.size();
+        s.pose_bytes.insert(s.pose_bytes.end(), pose.begin(), pose.end());
     }
     int nth = 0;   // (the same model drawn twice in a frame: the n-th draw of it is the n-th the frame before)
     for (const auto& o : s.skins) nth += dlss_actor::same_model(o.key, model);
     d.key = dlss_actor::key(k.vbuf, k.ibuf, k.count, k.base_vertex, k.program, nth);
     s.skins.push_back(std::move(d));
+    spent();
 }
 
 namespace {
