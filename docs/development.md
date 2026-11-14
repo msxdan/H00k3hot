@@ -193,7 +193,7 @@ See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-a
 | `HOS_INPUT_LIVE=<file>` | A file the test appends lines of presses to, read every 30 ms; each line's times count from when it is read. A line `!cheat <n>` sends a Cheats page action, `!synclog` logs the NVN syncs (`!dump`, `!shots`, `!rdoc` and `!flasharm` are the WebGPU renderer's) |
 | `HOS_INPUT_FRAME_CLOCK=1` | The script's time runs at 60 game frames a second instead of the wall clock |
 | `HOS_INPUT_EXCLUSIVE`, `HOS_INPUT_BACKGROUND`, `HOS_INPUT_SCRIPT_BACKGROUND` (set) | As above; the last lets every device count while the window is behind another one |
-| `RX_VK_MENU_SCRIPT=<seconds>:<key>,...` | Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `TABL`, `TABR` |
+| `RX_VK_MENU_SCRIPT=<seconds>:<key>,...` | Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `TABL`, `TABR`, the pad's face buttons `PADS`, `PADE`, `PADW`, `PADN`; and for a text field, `TYPE:<text>` (typed as the keyboard would, up to the next comma) and, while it has the keyboard, `HOME`, `END`, `BACK`, `DEL` besides `LEFT`, `RIGHT`, `ENTER`, `ESC` |
 | `RX_VK_UI_PROMPTS=pad` or `keys` | The menu's button prompts for a controller or the keys, whatever was used last (screenshots) |
 | `RX_VK_UI_GAME_FONT=0` | The menu, the counter and the start-up screen in the included Libertinus, not the game's own font |
 
@@ -608,7 +608,12 @@ menu's order, with its choices and default: `tests/test_readme_menu_rows.py` fai
 case with `_` for spaces (`frame_generation=2`, `invert_camera_x=1`), except Output resolution, which is `output_res`.
 `gpu/vk/vk_menu.cpp` writes the whole file at every change (`save`), with `options_version=5`,
 `microphone_device=<name>` when a microphone is chosen by name, and the controls (`pad_<button>`, `key_<button>` and `toggle_<button>`:
-the README's [Controls](../README.md#controls)). A value outside a row's range is clamped when it is read. Where the
+the README's [Controls](../README.md#controls)). A value outside a row's range is clamped when it is read. A text field
+(Custom output size: printable ASCII, with full-width digits and `ｘ` folded to ASCII) is saved as its setting is:
+Custom output size as `output_res`. A pad can edit it without a keyboard: D-pad Left/Right moves the caret, Up/Down
+cycles the character, the right shoulder inserts a digit and the left shoulder removes a character. The end caret
+can also append with Up/Down. Confirm commits, Back cancels, and the shown Paste button still pastes. No platform
+screen keyboard is requested. Where the
 number is not the obvious one:
 
 `toggle_<button>=0|1` is the Controls page's Toggle column: 0 Off (default), 1 press once to hold and again to release.
@@ -616,7 +621,14 @@ It applies after remapping to either pad binding, keys and mouse buttons. Only S
 Plus and Minus; directions, Walk and ocarina notes do not. Other values mean Off. Saving keeps the flags, not live latches.
 Opening Insert, Plus/Minus, focus loss, rebinding and Reset to defaults clear latches. Background pad presses can
 latch again when Controller in background permits them. Linux's other game dialogs are not guaranteed resets;
-Insert always releases the latch.
+Insert always releases the latch. Text fields use physical pad edges, not latched gameplay buttons: a held confirm
+or shoulder does not commit or add another character when editing starts. Fresh presses and D-pad repeats still edit,
+and keyboard editing keys reach the field while the game receives none.
+
+Custom output size's restart state tracks the actual width and height, not just the custom choice's list index.
+Audio output keeps its separate channel-layout state: Mono and Stereo share a restart value, so switching between
+them does not renew a size change's declined restart prompt. Choosing a different channel layout still does.
+`tests/test_menu_text_field.py` exercises these changes together, including restoring the original size.
 
 | Key | Values |
 |---|---|

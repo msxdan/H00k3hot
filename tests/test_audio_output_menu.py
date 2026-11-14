@@ -18,12 +18,21 @@ RUN_ALL_ARGS = ["--cxx", "g++"]
 ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE = r"""
+#include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdint>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
+#include "host/hos_wide_size.h"
+#include "gpu/vk/display_modes.h"
+using namespace mkwvk;
+std::vector<display_modes::Size> screen_modes() { return {}; }
+bool screen_size(uint32_t*, uint32_t*) { return false; }
+bool host_screen_size(uint32_t*, uint32_t*) { return false; }
 
 using DWORD = unsigned long;
 constexpr int MAX_PATH = 260;
@@ -125,6 +134,7 @@ def main():
     menu_part = between(menu, "/// A row's hints from a table", "const char* tx_framegen(") + hints.group(0) + \
         between(menu, "const char* tx_audio_output(int v) {", "const char* tx_robust(") + \
         between(menu, "const char* ini_key(const Row& r) {", "// (hookshot) the controls, kept by the host")
+    menu_part += between(menu, "struct Out {", "/// The choice of size w x h:")
     menu_part += between(menu, "int row_restart_value(const Row& r) {", "void restart_init() {")
     assert "restart_state.add(row_restart_value(rows[i]))" in menu
     assert "now[restart_slot[i]] = row_restart_value(rows[i]);" in menu
@@ -132,7 +142,7 @@ def main():
         work = Path(tmp)
         source, exe = work / "fixture.cpp", work / "fixture.exe"
         source.write_text(FIXTURE.replace("HOST", host).replace("MENU", menu_part), encoding="utf-8")
-        subprocess.run([args.cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(exe)], check=True)
+        subprocess.run([args.cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT), str(source), "-o", str(exe)], check=True)
         for saved, env_channels, device, want, asked, log in CASES:
             ini = work / "hookshot_options.ini"
             if ini.exists():
