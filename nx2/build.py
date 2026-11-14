@@ -348,6 +348,19 @@ class ProcessMemory(ctypes.Structure):   # (Windows' PROCESS_MEMORY_COUNTERS, fo
 # and the compile countdown's guess of how many the free memory holds. About the median chunk's peak)
 COMPILER_MB = 1500
 
+# HOOKSHOT_SPLIT_GIANTS (nx2/split_giants.py): the lifted functions of split_giants.MIN_KB or more are compiled as pieces cut at
+# their labels, with a dispatch loop under the function's own name (compile_one compiles that copy; the lifted files stay as the
+# lift wrote them, so its patches, cuts and lists never see the pieces). On by default at split_giants.PIECE_KB (8): a whole
+# first build's compile 1,347 -> 1,057 s on a Ryzen 5 5600. "0": off; a number: the pieces' size in KB
+def split_giants_flags():
+    """The flag the lifted chunks carry when their giants are split (split_giants.FLAG: the piece size and the splitter's own
+    hash, so a change of either builds them again); [] when off"""
+    raw = os.environ.get("HOOKSHOT_SPLIT_GIANTS", "").strip()
+    if raw == "0":
+        return []
+    import split_giants
+    return [split_giants.flag(int(raw) if raw.isdigit() else split_giants.PIECE_KB)]
+
 
 def free_mb():
     """The memory free now (MemAvailable on Linux, the available physical memory on Windows), in MB; None: not known"""
@@ -456,8 +469,14 @@ def mem_need(src):
     if name.startswith("code_"):
         with open(src, "rb") as f:
             text = f.read()
-        # (each function from the newline before its definition, as this was first measured)
-        starts = [m.start() - 1 for m in lifted_c.HEAD_BYTES.finditer(text)] + [len(text)]
+        # (each function from the newline before its definition, as this was first measured; a giant's pieces are functions
+        # of their own: split_giants.py, the copy compile_one compiles)
+        starts = [m.start() - 1 for m in lifted_c.HEAD_BYTES.finditer(text)]
+        i = text.find(b"\nstatic __attribute__((noinline)) uintptr_t s_")
+        while i >= 0:
+            starts.append(i)
+            i = text.find(b"\nstatic __attribute__((noinline)) uintptr_t s_", i + 1)
+        starts = sorted(starts) + [len(text)]
         largest = max([b - a for a, b in zip(starts, starts[1:])] or [0])
         return int(400 + 50 * len(text) / (1 << 20) + 250 * largest / (1 << 20))
     return 1000 if src.endswith(".cpp") else 400
@@ -971,10 +990,14 @@ def compile_one(job):
             shutil.copyfile(cached, obj)
         open(stamp, "w").write(key)
         return src, 0.0, None
-    lease = GATE.enter(src) if GATE else None
+    c_src = src
+    if any(f.startswith("-DHOOKSHOT_SPLIT_GIANTS=") for f in fl):   # (HOOKSHOT_SPLIT_GIANTS: a copy with the giants cut, if any)
+        import split_giants
+        c_src = split_giants.compile_copy(src, obj, fl)
+    lease = GATE.enter(c_src) if GATE else None
     t = time.time()
     try:
-        with subprocess.Popen([cc] + fl + ["-c", src, "-o", obj], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
+        with subprocess.Popen([cc] + fl + ["-c", c_src, "-o", obj], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
             no_throttle(getattr(p, "_handle", None))
             if GATE:
                 GATE.started(lease, p)
@@ -982,6 +1005,8 @@ def compile_one(job):
     finally:
         if GATE:
             GATE.leave(lease)
+        if c_src != src and os.path.exists(c_src):
+            os.remove(c_src)
     r = subprocess.CompletedProcess(p.args, p.returncode, out, err)
     if r.returncode:
         failure = r.stderr or r.stdout or "Compiler exited with status %d without diagnostics." % r.returncode
@@ -1074,8 +1099,10 @@ def main():
         # new profile kept the hot code built from the old one)
         with open(PGO, "rb") as f:
             hot_fl = hot_fl + ["-fprofile-instr-use=" + PGO, "-DHOOKSHOT_PROFILE_SHA1=" + hashlib.sha1(f.read(), usedforsecurity=False).hexdigest()[:16]]
+    split_fl = fl + split_giants_flags()   # (the lifted chunks; not the hot pieces, whose profile was counted on the whole functions)
     jobs = [(cc, s, os.path.join(obj_dir, os.path.basename(s)[:-2] + ".o"),
-             hot_fl if os.path.basename(s).startswith("code_hot") else fl,
+             hot_fl if os.path.basename(s).startswith("code_hot") else
+             split_fl if os.path.basename(s).startswith("code_") and os.path.dirname(s) == gen else fl,
              shim_deps if os.path.dirname(s) == NX2_RT else deps) for s in srcs]
     if KEPT and OBJ_STORE:   # (a kept object the folder let go that another work folder gave the store)
         object_store.fetch(OBJ_STORE, OBJ_CACHE, [k[0] for k in KEPT.values()])
